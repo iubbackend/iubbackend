@@ -102,7 +102,7 @@ export default function AuthPage() {
               {/* Submit Button */}
               <button disabled={isLoading} className="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold rounded-xl py-3 flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
                 {isLoading ? (
-                  <motion.div animate={{ rotagitte: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
                     <KeyRound size={20} />
                   </motion.div>
                 ) : (
