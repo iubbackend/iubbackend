@@ -1,45 +1,91 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Search, LogOut, BookOpen, Layers, Award, ShieldCheck, 
-  Lock, Unlock, CreditCard, CheckCircle2, X, ChevronDown, Sparkles 
+  Search, LogOut, Award, Lock, Unlock, CreditCard, CheckCircle2, X, ChevronDown, Sparkles 
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-// Types for our data structure
 type SearchMode = "Roll Number" | "Name" | "Semester" | "Section";
 
 export default function DashboardPage() {
   const router = useRouter();
   
-  // States
+  // Search States
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("Roll Number");
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<any[] | null>(null);
   
+  // Name Filter States
+  const [department, setDepartment] = useState("All");
+  const [session, setSession] = useState("All");
+  const [section, setSection] = useState("All");
+  
+  // Filter Options from DB
+  const [filterOptions, setFilterOptions] = useState({
+    departments: [],
+    sessions: [],
+    sections: []
+  });
+  
   // Premium / Paywall States
-  const [isPremium, setIsPremium] = useState(false); // Mock database premium flag
+  const [isPremium, setIsPremium] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // Mock search execution
+  // Fetch filter options when "Name" mode is selected
+  useEffect(() => {
+    if (searchMode === "Name" && filterOptions.departments.length === 0) {
+      fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "GET_FILTERS" }),
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) {
+          setFilterOptions(data);
+        }
+      })
+      .catch(err => console.error("Failed to load filters", err));
+    }
+  }, [searchMode]);
+
+  // Execute Search against TiDB
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     setIsSearching(true);
+    setResults(null);
 
-    // Simulated API call fetching from TiDB
-    setTimeout(() => {
-      setResults([
-        { code: "CS-101", name: "Programming Fundamentals", mid: 22, sessional: 18, final: 45, total: 85, grade: "A", gp: 4.0 },
-        { code: "CS-102", name: "Digital Logic Design", mid: 18, sessional: 15, final: 38, total: 71, grade: "B", gp: 3.0 },
-        { code: "ISL-101", name: "Islamic Studies", mid: 25, sessional: 20, final: 40, total: 85, grade: "A", gp: 4.0 },
-        { code: "MATH-101", name: "Calculus & Geometry", mid: 12, sessional: 10, final: 28, total: 50, grade: "C", gp: 2.0 },
-      ]);
+    try {
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SEARCH",
+          searchQuery,
+          searchMode,
+          department,
+          session,
+          section
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.results) {
+        setResults(data.results);
+      } else {
+        setResults([]); // No results found
+      }
+    } catch (error) {
+      console.error("Search failed", error);
+      alert("Failed to connect to the database.");
+    } finally {
       setIsSearching(false);
-    }, 1200);
+    }
   };
 
   return (
@@ -83,53 +129,103 @@ export default function DashboardPage() {
       </div>
 
       {/* SEARCH CONTROLLER */}
-      <div className="bg-slate-900/40 backdrop-blur-md border border-slate-900 p-6 rounded-3xl shadow-xl mb-10">
-        <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-4">
-          {/* Dropdown for Search Mode */}
-          <div className="relative md:w-48">
-            <select 
-              value={searchMode}
-              onChange={(e) => setSearchMode(e.target.value as SearchMode)}
-              className="w-full appearance-none bg-slate-950/80 border border-slate-800 text-slate-300 rounded-2xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 text-sm font-medium transition-all"
+      <div className="bg-slate-900/40 backdrop-blur-md border border-slate-900 p-6 rounded-3xl shadow-xl mb-10 transition-all">
+        <form onSubmit={handleSearch} className="flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            {/* Dropdown for Search Mode */}
+            <div className="relative md:w-48">
+              <select 
+                value={searchMode}
+                onChange={(e) => {
+                  setSearchMode(e.target.value as SearchMode);
+                  setSearchQuery(""); // Reset query when mode changes
+                }}
+                className="w-full appearance-none bg-slate-950/80 border border-slate-800 text-slate-300 rounded-2xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 text-sm font-medium transition-all"
+              >
+                <option value="Roll Number">Roll Number</option>
+                <option value="Name">Student Name</option>
+                <option value="Semester">Semester</option>
+                <option value="Section">Section</option>
+              </select>
+              <ChevronDown className="absolute right-4 top-4 text-slate-500 pointer-events-none" size={16} />
+            </div>
+
+            {/* Input Field */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
+              <input 
+                type="text" 
+                placeholder={`Enter ${searchMode} (e.g. ${searchMode === 'Roll Number' ? 'SP21-BCS-089' : searchMode === 'Semester' ? '8' : 'John Doe'})...`}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-950/80 border border-slate-800 text-white placeholder-slate-500 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/50 transition-all text-sm font-medium"
+              />
+            </div>
+
+            {/* Submit Button */}
+            <button 
+              type="submit" 
+              disabled={isSearching || !searchQuery.trim()}
+              className="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold rounded-2xl px-8 py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <option value="Roll Number">Roll Number</option>
-              <option value="Name">Student Name</option>
-              <option value="Semester">Semester</option>
-              <option value="Section">Section</option>
-            </select>
-            <ChevronDown className="absolute right-4 top-4 text-slate-500 pointer-events-none" size={16} />
+              {isSearching ? (
+                <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>Search Matrix <Sparkles size={16} /></>
+              )}
+            </button>
           </div>
 
-          {/* Input Field */}
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
-            <input 
-              type="text" 
-              placeholder={`Enter ${searchMode} (e.g. ${searchMode === 'Roll Number' ? 'SP21-BCS-089' : searchMode === 'Semester' ? '8' : 'John Doe'})...`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950/80 border border-slate-800 text-white placeholder-slate-500 rounded-2xl py-3.5 pl-12 pr-4 focus:outline-none focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/50 transition-all text-sm font-medium"
-            />
-          </div>
+          {/* DYNAMIC FILTERS (ONLY SHOW IF MODE IS "NAME") */}
+          <AnimatePresence>
+            {searchMode === "Name" && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex flex-col sm:flex-row gap-4 pt-2 overflow-hidden"
+              >
+                {/* Department Dropdown */}
+                <div className="flex-1 relative">
+                  <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full appearance-none bg-slate-950/50 border border-slate-800 text-slate-400 rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500 text-sm">
+                    <option value="All">All Departments</option>
+                    {filterOptions.departments.map((dep, idx) => (
+                      <option key={idx} value={dep}>{dep}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-3 text-slate-600 pointer-events-none" size={14} />
+                </div>
+                
+                {/* Session Dropdown */}
+                <div className="flex-1 relative">
+                  <select value={session} onChange={(e) => setSession(e.target.value)} className="w-full appearance-none bg-slate-950/50 border border-slate-800 text-slate-400 rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500 text-sm">
+                    <option value="All">All Sessions</option>
+                    {filterOptions.sessions.map((sess, idx) => (
+                      <option key={idx} value={sess}>{sess}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-3 text-slate-600 pointer-events-none" size={14} />
+                </div>
 
-          {/* Submit Button */}
-          <button 
-            type="submit" 
-            disabled={isSearching}
-            className="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold rounded-2xl px-8 py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {isSearching ? (
-              <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <>Search Matrix <Sparkles size={16} /></>
+                {/* Section Dropdown */}
+                <div className="flex-1 relative">
+                  <select value={section} onChange={(e) => setSection(e.target.value)} className="w-full appearance-none bg-slate-950/50 border border-slate-800 text-slate-400 rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500 text-sm">
+                    <option value="All">All Sections</option>
+                    {filterOptions.sections.map((sec, idx) => (
+                      <option key={idx} value={sec}>{sec}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-3 text-slate-600 pointer-events-none" size={14} />
+                </div>
+              </motion.div>
             )}
-          </button>
+          </AnimatePresence>
         </form>
       </div>
 
       {/* RESULTS RENDER ENGINE */}
       <AnimatePresence mode="wait">
-        {results && (
+        {results && results.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}
             className="space-y-8"
@@ -140,7 +236,7 @@ export default function DashboardPage() {
                 <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
                   <thead>
                     <tr className="bg-slate-950 border-b border-slate-900 text-slate-400 font-semibold">
-                      <th className="px-6 py-4">Course Name</th>
+                      <th className="px-6 py-4">Course Details</th>
                       <th className="px-6 py-4 text-center text-emerald-400">Mid Marks</th>
                       <th className="px-6 py-4 text-center">Sessional</th>
                       <th className="px-6 py-4 text-center">Final Exam</th>
@@ -152,18 +248,18 @@ export default function DashboardPage() {
                     {results.map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
                         <td className="px-6 py-4">
-                          <p className="font-medium text-white">{item.name}</p>
-                          <p className="text-xs text-slate-500 font-mono mt-0.5">{item.code}</p>
+                          <p className="font-medium text-white">{item.course_name || "Course Name"}</p>
+                          <p className="text-xs text-slate-500 font-mono mt-0.5">{item.course_code || "Code"}</p>
                         </td>
-                        <td className="px-6 py-4 text-center font-mono text-emerald-400 font-bold text-lg">{item.mid}</td>
+                        <td className="px-6 py-4 text-center font-mono text-emerald-400 font-bold text-lg">{item.mid_marks || 0}</td>
                         
                         {/* Masked/Premium Columns */}
-                        <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.sessional}</td>
-                        <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.final}</td>
-                        <td className={`px-6 py-4 text-center font-mono font-bold ${!isPremium && "blur-[6px] select-none opacity-50 text-white"}`}>{item.total}</td>
+                        <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.sessional_marks || 0}</td>
+                        <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.final_marks || 0}</td>
+                        <td className={`px-6 py-4 text-center font-mono font-bold ${!isPremium && "blur-[6px] select-none opacity-50 text-white"}`}>{item.total_marks || 0}</td>
                         <td className="px-6 py-4 text-center">
                           <span className={`inline-block px-3 py-1 rounded-md text-xs font-bold bg-slate-950 border border-slate-800 ${!isPremium ? "blur-[6px] select-none opacity-50" : "text-teal-400"}`}>
-                            {item.grade}
+                            {item.grade || "N/A"}
                           </span>
                         </td>
                       </tr>
@@ -172,13 +268,13 @@ export default function DashboardPage() {
                 </table>
               </div>
 
-              {/* Paywall Overlay inside the table if not premium */}
+              {/* Paywall Overlay */}
               {!isPremium && (
                 <div className="absolute top-[60px] bottom-0 right-0 left-[30%] sm:left-[40%] bg-gradient-to-l from-slate-950 via-slate-950/90 to-transparent flex flex-col justify-center items-end pr-8 sm:pr-16 backdrop-blur-[1px]">
                   <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-2xl flex flex-col items-center text-center max-w-xs animate-pulse hover:animate-none transition-all">
                     <Lock className="text-amber-400 mb-2" size={28} />
                     <h3 className="text-white font-bold text-lg">Results Locked</h3>
-                    <p className="text-slate-400 text-xs mt-1 mb-4">You are viewing the basic tier. Upgrade to view final marks, sessionals, and exact GPAs.</p>
+                    <p className="text-slate-400 text-xs mt-1 mb-4">Upgrade to view final marks, sessionals, and exact GPAs.</p>
                     <button 
                       onClick={() => setShowUpgradeModal(true)}
                       className="w-full bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-white text-sm font-bold py-2.5 rounded-xl shadow-lg shadow-amber-500/20 transition-all active:scale-95"
@@ -191,20 +287,25 @@ export default function DashboardPage() {
             </div>
           </motion.div>
         )}
+
+        {/* No Results Fallback */}
+        {results && results.length === 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12 border border-slate-800/50 rounded-3xl bg-slate-900/10">
+            <p className="text-slate-400">No records found for that query.</p>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* UPGRADE MODAL POPUP */}
       <AnimatePresence>
         {showUpgradeModal && (
           <>
-            {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setShowUpgradeModal(false)}
               className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50"
             />
             
-            {/* Modal Content */}
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-3xl shadow-2xl z-50"
@@ -231,7 +332,6 @@ export default function DashboardPage() {
                 </ul>
               </div>
 
-              {/* Payment Instructions (Adapt exactly to your old code logic) */}
               <div className="space-y-4">
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
                   <p className="text-xs text-emerald-400 font-bold uppercase tracking-wide mb-1">Subscription Fee</p>
@@ -242,7 +342,6 @@ export default function DashboardPage() {
                   Pay via EasyPaisa or JazzCash to the verified admin account below, then upload a screenshot.
                 </div>
 
-                {/* Mock Payment Details */}
                 <div className="bg-slate-950 rounded-xl p-4 flex items-center justify-between border border-slate-800">
                   <div className="flex items-center gap-3">
                     <CreditCard className="text-slate-500" size={20} />
@@ -255,7 +354,6 @@ export default function DashboardPage() {
 
                 <button 
                   onClick={() => {
-                    // MOCK PAYMENT SUCCESS LOGIC
                     setIsPremium(true);
                     setShowUpgradeModal(false);
                     alert("Mock: Payment uploaded and approved! You are now Premium.");
