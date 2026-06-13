@@ -11,12 +11,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en" className="dark selection:bg-emerald-500/30 selection:text-emerald-200">
-      <body className={`${inter.className} bg-slate-950 text-slate-50 antialiased min-h-screen relative overflow-x-hidden`}>
+      <body 
+        className={`${inter.className} bg-slate-950 text-slate-50 antialiased min-h-screen relative overflow-x-hidden`}
+      >
         {/* Universal Ambient Dynamic Lighting Grid */}
         <div className="pointer-events-none fixed inset-0 z-0">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.03),transparent_50%)]" />
