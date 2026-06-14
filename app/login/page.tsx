@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft } from 'lucide-react';
 
 type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email';
 
 export default function LoginPage() {
+  const router = useRouter();
+
   // State for View Management
   const [view, setView] = useState<ViewState>('login');
   
@@ -86,8 +89,20 @@ export default function LoginPage() {
       if (error || !data) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
-        setSuccessMsg('Login successful! Welcome back.');
-        // window.location.href = '/dashboard';
+        // --- ADDED: Actual Supabase Auth Sign In so middleware recognizes the session ---
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: data.email, 
+          password: password,
+        });
+
+        if (authError) {
+          setErrorMsg('Authentication error: ' + authError.message);
+        } else {
+          setSuccessMsg('Login successful! Welcome back.');
+          // Redirect to dashboard using Next.js router
+          router.push('/dashboard');
+          router.refresh();
+        }
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
