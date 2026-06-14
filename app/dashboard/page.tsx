@@ -1,332 +1,383 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, LogOut, Award, Lock, Unlock, CreditCard, CheckCircle2, 
-  X, ChevronDown, Sparkles, GraduationCap, Building, Calendar, Users
+  X, ChevronDown, Sparkles, GraduationCap, Building, Calendar, Users, 
+  Sun, Moon, ChevronRight, Calculator
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type SearchMode = "Roll Number" | "Name" | "Semester" | "Section";
+// Assumes the grading utility is created in the utils folder
+// import { calculateGPA, processStudentRecords, CourseRecord } from '@/app/utils/grading';
+
+type SearchMode = "Roll Number" | "Name";
+type Theme = "light" | "dark";
 
 export default function DashboardPage() {
   const router = useRouter();
+  
+  // Theme State
+  const [theme, setTheme] = useState<Theme>("light");
   
   // Search States
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("Roll Number");
   const [isSearching, setIsSearching] = useState(false);
-  const [results, setResults] = useState<any[] | null>(null);
   
-  // Name Filter States
+  // Filter States (Visible only in 'Name' mode)
   const [department, setDepartment] = useState("All");
   const [session, setSession] = useState("All");
   const [section, setSection] = useState("All");
   
-  // Filter Options from DB
   const [filterOptions, setFilterOptions] = useState({
-    departments: [],
-    sessions: [],
-    sections: []
+    departments: ["BS Computer Science", "BS Software Engineering", "BS Information Technology"],
+    sessions: ["Fall 2020", "Spring 2021", "Fall 2021", "Spring 2022"],
+    sections: ["F20-BSCS-1", "F20-BSCS-2", "SP21-BSSE-1"]
   });
+
+  // Results & Expansion States
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [expandedReg, setExpandedReg] = useState<string | null>(null);
+  const [studentDetails, setStudentDetails] = useState<any | null>(null);
   
-  // Premium / Paywall States
+  // Paywall States
   const [isPremium, setIsPremium] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // Fetch filter options when "Name" mode is selected
-  useEffect(() => {
-    if (searchMode === "Name" && filterOptions.departments.length === 0) {
-      fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "GET_FILTERS" }),
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) {
-          setFilterOptions(data);
-        }
-      })
-      .catch(err => console.error("Failed to load filters", err));
-    }
-  }, [searchMode]);
+  // Toggle Theme
+  const toggleTheme = () => setTheme(prev => prev === "light" ? "dark" : "light");
 
-  // Execute Search against TiDB
+  // Dynamic Theme Classes
+  const t = {
+    bg: theme === "light" ? "bg-[#f8fafc]" : "bg-[#00122a]",
+    text: theme === "light" ? "text-slate-800" : "text-slate-100",
+    textMuted: theme === "light" ? "text-slate-500" : "text-blue-300",
+    cardBg: theme === "light" ? "bg-white" : "bg-[#001c4d]/80",
+    border: theme === "light" ? "border-slate-200" : "border-[#00348c]",
+    primary: theme === "light" ? "text-[#0056b3]" : "text-amber-400",
+    inputBg: theme === "light" ? "bg-white" : "bg-[#00122a]",
+    inputFocus: theme === "light" ? "focus:border-[#0056b3] focus:ring-[#0056b3]/20" : "focus:border-amber-500 focus:ring-amber-500/50",
+    btnPrimary: theme === "light" 
+      ? "bg-[#0056b3] hover:bg-[#004494] text-white shadow-[#0056b3]/20" 
+      : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] shadow-amber-500/20",
+    tableHeader: theme === "light" ? "bg-[#0056b3] text-white" : "bg-[#00122a] text-blue-200",
+    rowHover: theme === "light" ? "hover:bg-slate-50" : "hover:bg-[#00205b]/60"
+  };
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     setIsSearching(true);
-    setResults(null);
+    setExpandedReg(null);
+    setStudentDetails(null);
 
-    try {
-      const response = await fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "SEARCH",
-          searchQuery,
-          searchMode,
-          department,
-          session,
-          section
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (data.results) {
-        setResults(data.results);
+    // Mock Database Fetch Logic
+    setTimeout(() => {
+      if (searchMode === "Name") {
+        setSearchResults([
+          { reg: "F20-BSCS-001", name: "Ahmed Ali", session: "Fall 2020", section: "F20-BSCS-1", latestSem: 8 },
+          { reg: "F20-BSCS-089", name: "Ahmed Khan", session: "Fall 2020", section: "F20-BSCS-2", latestSem: 8 }
+        ]);
       } else {
-        setResults([]); // No results found
+        // Roll Number Direct Search - Auto Expand
+        setSearchResults([{ reg: searchQuery.toUpperCase(), name: "John Doe", session: "Fall 2020", section: "F20-BSCS-1", latestSem: 8 }]);
+        handleExpandResult(searchQuery.toUpperCase());
       }
-    } catch (error) {
-      console.error("Search failed", error);
-      alert("Failed to connect to the database.");
-    } finally {
       setIsSearching(false);
+    }, 800);
+  };
+
+  const handleExpandResult = (reg: string) => {
+    if (expandedReg === reg) {
+      setExpandedReg(null); // Collapse if already open
+      return;
     }
+    setExpandedReg(reg);
+    
+    // Mock Fetch Detailed Semester Records
+    // In production: Process with calculateGPA & processStudentRecords from grading.ts
+    setStudentDetails({
+      cgpa: 3.84,
+      semesters: [
+        {
+          semNum: 8,
+          sgpa: 3.91,
+          courses: [
+            { code: "CS401", name: "Final Year Project II", mid: 28, sessional: 18, final: 45, total: 91, grade: "A" },
+            { code: "CS405", name: "Information Security", mid: 25, sessional: 16, final: 40, total: 81, grade: "B+" },
+          ]
+        },
+        {
+          semNum: 7,
+          sgpa: 3.75,
+          courses: [
+            { code: "CS400", name: "Final Year Project I", mid: 26, sessional: 19, final: 42, total: 87, grade: "A" },
+            { code: "CS311", name: "Artificial Intelligence", mid: 22, sessional: 15, final: 38, total: 75, grade: "B" },
+          ]
+        }
+      ]
+    });
   };
 
   return (
-    // Base wrapper with IUB Deep Blue Theme (#00173D to #00205B)
-    <div className="flex-1 w-full min-h-screen bg-[#00122a] text-slate-100 font-sans selection:bg-amber-500/30 selection:text-amber-200">
+    <div className={`flex-1 w-full min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300`}>
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-12 relative z-10">
         
-        {/* GLOBAL HEADER */}
-        <header className="flex justify-between items-center mb-12 border-b border-[#002a70] pb-6">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-[#00173D] font-black text-xl shadow-lg shadow-amber-500/20">
-              IUB
+        {/* HEADER */}
+        <header className={`flex justify-between items-center mb-10 border-b ${t.border} pb-6`}>
+          <div className="flex items-center gap-3">
+            {/* SVG Logo */}
+            <div className={`h-12 w-12 rounded-xl flex items-center justify-center shadow-lg ${theme === 'light' ? 'bg-[#0056b3] text-white shadow-[#0056b3]/20' : 'bg-gradient-to-br from-amber-400 to-amber-600 text-[#00173D] shadow-amber-500/20'}`}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+                <path d="M8 7h6"/><path d="M8 11h8"/>
+              </svg>
             </div>
             <div>
-              <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-                Result Portal
-                {isPremium && <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] uppercase tracking-wider font-bold">PRO</span>}
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
+                IUB Backend
+                {isPremium && <span className={`px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider font-bold border ${theme === 'light' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>PRO</span>}
               </h1>
-              <p className="text-xs text-blue-300">The Islamia University of Bahawalpur</p>
+              <p className={`text-xs ${t.textMuted} font-medium`}>Academic Result Portal</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {!isPremium && (
-              <button onClick={() => setShowUpgradeModal(true)} className="hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 font-medium text-sm transition-all duration-200">
-                <Unlock size={16} /> Unlock Full Access
-              </button>
-            )}
-            <button onClick={() => router.push("/login")} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#00205b] border border-[#00348c] hover:border-red-500/50 hover:bg-red-500/10 text-blue-200 hover:text-red-400 font-medium text-sm transition-all duration-200 shadow-sm">
+          
+          <div className="flex items-center gap-4">
+            {/* Theme Toggle */}
+            <button onClick={toggleTheme} className={`p-2.5 rounded-full border ${t.border} ${theme === 'light' ? 'bg-white hover:bg-slate-100 text-amber-500' : 'bg-[#001c4d] hover:bg-[#002a70] text-blue-300'} transition-all`}>
+              {theme === "light" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button onClick={() => router.push("/login")} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border ${t.border} ${t.cardBg} hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-500 font-medium text-sm transition-all shadow-sm`}>
               <LogOut size={16} /> <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </header>
 
-        {/* HERO SECTION */}
-        <div className="mb-8 text-center sm:text-left flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">
-              Database Query Interface
-            </h2>
-            <p className="text-blue-300 text-sm md:text-base mt-2 max-w-xl">
-              Search the IUB academic registry. Verify grading profiles, mid-term standings, and final transcript records instantly.
-            </p>
-          </div>
-        </div>
-
-        {/* SEARCH CONTROLLER - IUB Blue Theme */}
-        <div className="bg-[#001c4d]/80 backdrop-blur-md border border-[#00348c] p-6 rounded-2xl shadow-2xl mb-10 transition-all">
+        {/* SEARCH CONTROLLER */}
+        <div className={`${t.cardBg} backdrop-blur-md border ${t.border} p-6 rounded-2xl shadow-xl mb-8 transition-all`}>
           <form onSubmit={handleSearch} className="flex flex-col gap-4">
             
-            {/* DYNAMIC FILTERS (SHOWN ABOVE SEARCH BAR ONLY IF MODE IS "NAME") */}
+            <div className="flex items-center gap-4 mb-2">
+              <label className={`text-sm font-bold ${theme === 'light' ? 'text-slate-700' : 'text-blue-200'}`}>Search By:</label>
+              <div className="relative w-48">
+                <select 
+                  value={searchMode}
+                  onChange={(e) => {
+                    setSearchMode(e.target.value as SearchMode);
+                    setSearchQuery("");
+                    setSearchResults(null);
+                  }}
+                  className={`w-full appearance-none ${t.inputBg} border ${t.border} ${t.primary} rounded-xl px-4 py-2 focus:outline-none ${t.inputFocus} text-sm font-semibold transition-all cursor-pointer`}
+                >
+                  <option value="Roll Number">Roll Number</option>
+                  <option value="Name">Student Name</option>
+                </select>
+                <ChevronDown className={`absolute right-3 top-2.5 pointer-events-none ${t.primary}`} size={16} />
+              </div>
+            </div>
+
+            {/* DYNAMIC FILTERS FOR "NAME" MODE */}
             <AnimatePresence>
               {searchMode === "Name" && (
                 <motion.div 
-                  initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                  animate={{ opacity: 1, height: "auto", marginBottom: 8 }}
-                  exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                  className="flex flex-col sm:flex-row gap-4 overflow-hidden"
+                  initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-col sm:flex-row gap-4 overflow-hidden pt-2"
                 >
-                  {/* Department Dropdown */}
                   <div className="flex-1 relative">
-                    <Building className="absolute left-3.5 top-3 text-blue-400" size={16} />
-                    <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full appearance-none bg-[#00122a] border border-[#00348c] text-blue-100 rounded-xl pl-10 pr-10 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 text-sm transition-colors">
-                      <option value="All">All Departments</option>
-                      {filterOptions.departments.map((dep, idx) => (
-                        <option key={idx} value={dep}>{dep}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3.5 top-3 text-blue-400 pointer-events-none" size={16} />
-                  </div>
-                  
-                  {/* Session Dropdown */}
-                  <div className="flex-1 relative">
-                    <Calendar className="absolute left-3.5 top-3 text-blue-400" size={16} />
-                    <select value={session} onChange={(e) => setSession(e.target.value)} className="w-full appearance-none bg-[#00122a] border border-[#00348c] text-blue-100 rounded-xl pl-10 pr-10 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 text-sm transition-colors">
+                    <Calendar className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
+                    <select value={session} onChange={(e) => setSession(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
                       <option value="All">All Sessions</option>
-                      {filterOptions.sessions.map((sess, idx) => (
-                        <option key={idx} value={sess}>{sess}</option>
-                      ))}
+                      {filterOptions.sessions.map((s, i) => <option key={i} value={s}>{s}</option>)}
                     </select>
-                    <ChevronDown className="absolute right-3.5 top-3 text-blue-400 pointer-events-none" size={16} />
                   </div>
-
-                  {/* Section Dropdown */}
                   <div className="flex-1 relative">
-                    <Users className="absolute left-3.5 top-3 text-blue-400" size={16} />
-                    <select value={section} onChange={(e) => setSection(e.target.value)} className="w-full appearance-none bg-[#00122a] border border-[#00348c] text-blue-100 rounded-xl pl-10 pr-10 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 text-sm transition-colors">
-                      <option value="All">All Sections</option>
-                      {filterOptions.sections.map((sec, idx) => (
-                        <option key={idx} value={sec}>{sec}</option>
-                      ))}
+                    <Building className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
+                    <select value={department} onChange={(e) => setDepartment(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
+                      <option value="All">All Departments</option>
+                      {filterOptions.departments.map((d, i) => <option key={i} value={d}>{d}</option>)}
                     </select>
-                    <ChevronDown className="absolute right-3.5 top-3 text-blue-400 pointer-events-none" size={16} />
+                  </div>
+                  <div className="flex-1 relative">
+                    <Users className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
+                    <select value={section} onChange={(e) => setSection(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
+                      <option value="All">All Sections</option>
+                      {filterOptions.sections.map((s, i) => <option key={i} value={s}>{s}</option>)}
+                    </select>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* MAIN SEARCH ROW */}
-            <div className="flex flex-col md:flex-row gap-4">
-              
-              {/* Left Dropdown for Search Mode */}
-              <div className="relative md:w-48">
-                <select 
-                  value={searchMode}
-                  onChange={(e) => {
-                    setSearchMode(e.target.value as SearchMode);
-                    setSearchQuery(""); // Reset query when mode changes
-                  }}
-                  className="w-full appearance-none bg-[#00122a] border border-[#00348c] text-amber-400 rounded-xl px-4 py-3.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 text-sm font-semibold transition-all shadow-inner cursor-pointer"
-                >
-                  <option value="Roll Number">Roll Number</option>
-                  <option value="Name">Student Name</option>
-                  <option value="Semester">Semester</option>
-                  <option value="Section">Section</option>
-                </select>
-                <ChevronDown className="absolute right-4 top-4 text-amber-500 pointer-events-none" size={16} />
-              </div>
-
-              {/* Input Field */}
+            {/* MAIN SEARCH BAR */}
+            <div className="flex flex-col md:flex-row gap-4 mt-2">
               <div className="flex-1 relative">
-                <Search className="absolute left-4 top-3.5 text-blue-400" size={20} />
+                <Search className={`absolute left-4 top-3.5 ${t.textMuted}`} size={20} />
                 <input 
                   type="text" 
-                  placeholder={`Enter ${searchMode} (e.g. ${searchMode === 'Roll Number' ? 'SP21-BCS-089' : searchMode === 'Semester' ? '8' : 'John Doe'})...`}
+                  placeholder={searchMode === 'Roll Number' ? "Enter Registration No (e.g. F20BSCS1M010)" : "Enter Student Name (e.g. Ali)"}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#00122a] border border-[#00348c] text-white placeholder-blue-400/50 rounded-xl py-3.5 pl-12 pr-4 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-all text-sm font-medium shadow-inner"
+                  className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-3.5 pl-12 pr-4 focus:outline-none ${t.inputFocus} transition-all text-sm font-medium shadow-sm`}
                 />
               </div>
-
-              {/* Submit Button (IUB Amber) */}
               <button 
                 type="submit" 
                 disabled={isSearching || !searchQuery.trim()}
-                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] font-bold rounded-xl px-8 py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                className={`${t.btnPrimary} font-bold rounded-xl px-8 py-3.5 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed`}
               >
-                {isSearching ? (
-                  <div className="h-5 w-5 border-2 border-[#00173d]/30 border-t-[#00173d] rounded-full animate-spin" />
-                ) : (
-                  <>Search <Sparkles size={16} /></>
-                )}
+                {isSearching ? <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><Search size={16} /> Search</>}
               </button>
             </div>
           </form>
         </div>
 
         {/* RESULTS RENDER ENGINE */}
-        <AnimatePresence mode="wait">
-          {results && results.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}
-              className="space-y-8"
-            >
-              {/* Table Container */}
-              <div className="bg-[#001c4d]/50 border border-[#00348c] rounded-2xl overflow-hidden shadow-2xl relative">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
-                    <thead>
-                      <tr className="bg-[#00122a] border-b border-[#00348c] text-blue-200 font-semibold">
-                        <th className="px-6 py-4 flex items-center gap-2"><GraduationCap size={16}/> Course Details</th>
-                        <th className="px-6 py-4 text-center text-amber-400">Mid Marks</th>
-                        <th className="px-6 py-4 text-center">Sessional</th>
-                        <th className="px-6 py-4 text-center">Final Exam</th>
-                        <th className="px-6 py-4 text-center">Total Marks</th>
-                        <th className="px-6 py-4 text-center">Grade</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#00348c]/50 text-blue-100 relative">
-                      {results.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-[#00205b]/60 transition-colors">
-                          <td className="px-6 py-4">
-                            <p className="font-medium text-white">{item.course_name || "Course Name"}</p>
-                            <p className="text-xs text-blue-300 font-mono mt-0.5">{item.course_code || "Code"}</p>
-                          </td>
-                          <td className="px-6 py-4 text-center font-mono text-amber-400 font-bold text-lg">{item.mid_marks || 0}</td>
-                          
-                          {/* Masked/Premium Columns */}
-                          <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.sessional_marks || 0}</td>
-                          <td className={`px-6 py-4 text-center font-mono ${!isPremium && "blur-[6px] select-none opacity-50"}`}>{item.final_marks || 0}</td>
-                          <td className={`px-6 py-4 text-center font-mono font-bold ${!isPremium && "blur-[6px] select-none opacity-50 text-white"}`}>{item.total_marks || 0}</td>
-                          <td className="px-6 py-4 text-center">
-                            <span className={`inline-block px-3 py-1.5 rounded-lg text-xs font-bold bg-[#00122a] border border-[#00348c] ${!isPremium ? "blur-[6px] select-none opacity-50" : "text-amber-400"}`}>
-                              {item.grade || "N/A"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Paywall Overlay */}
-                {!isPremium && (
-                  <div className="absolute top-[60px] bottom-0 right-0 left-[30%] sm:left-[40%] bg-gradient-to-l from-[#00122a] via-[#00122a]/95 to-transparent flex flex-col justify-center items-end pr-8 sm:pr-16 backdrop-blur-[1px]">
-                    <div className="bg-[#001c4d] border border-[#00348c] p-6 rounded-2xl shadow-2xl flex flex-col items-center text-center max-w-xs animate-pulse hover:animate-none transition-all">
-                      <div className="bg-amber-500/10 p-3 rounded-full mb-3">
-                        <Lock className="text-amber-400" size={24} />
+        <AnimatePresence>
+          {searchResults && searchResults.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+              {searchResults.map((student, idx) => (
+                <div key={idx} className={`${t.cardBg} border ${t.border} rounded-2xl shadow-sm overflow-hidden`}>
+                  
+                  {/* Student Summary Card */}
+                  <div className="p-4 sm:p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`h-12 w-12 rounded-full flex items-center justify-center border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-[#0056b3]' : 'bg-[#00122a] text-blue-300'}`}>
+                        <GraduationCap size={24} />
                       </div>
-                      <h3 className="text-white font-bold text-lg">Results Locked</h3>
-                      <p className="text-blue-200 text-xs mt-1 mb-5 leading-relaxed">Upgrade to view final marks, sessionals, and exact grading parameters.</p>
-                      <button 
-                        onClick={() => setShowUpgradeModal(true)}
-                        className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] text-sm font-bold py-2.5 rounded-xl shadow-lg shadow-amber-500/20 transition-all active:scale-95"
-                      >
-                        Upgrade to PRO
-                      </button>
+                      <div>
+                        <h3 className="text-lg font-bold flex items-center gap-2">
+                          {student.name}
+                          <span className={`text-xs px-2 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-600' : 'bg-[#00122a] border-[#00348c] text-blue-300'}`}>{student.reg}</span>
+                        </h3>
+                        <p className={`text-sm ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
+                          <Building size={14}/> {student.session} • {student.section} <span className="mx-1">|</span> Semester {student.latestSem}
+                        </p>
+                      </div>
                     </div>
+                    <button 
+                      onClick={() => handleExpandResult(student.reg)}
+                      className={`px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${expandedReg === student.reg ? (theme === 'light' ? 'bg-slate-100 text-slate-700 border border-slate-200' : 'bg-[#00122a] text-white border border-[#00348c]') : t.btnPrimary}`}
+                    >
+                      {expandedReg === student.reg ? "Close Result" : "See Result"} 
+                      <ChevronRight size={16} className={`transition-transform ${expandedReg === student.reg ? "rotate-90" : ""}`} />
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  {/* Expanded Semester-Wise Result */}
+                  <AnimatePresence>
+                    {expandedReg === student.reg && studentDetails && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                        className={`border-t ${t.border} overflow-hidden bg-opacity-50 ${theme === 'light' ? 'bg-slate-50' : 'bg-[#00122a]/50'}`}
+                      >
+                        <div className="p-5 sm:p-6 space-y-6">
+                          
+                          {/* CGPA Header */}
+                          <div className={`flex justify-center items-center p-4 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#001c4d] border-[#00348c]'}`}>
+                            <div className="text-center">
+                              <span className={`text-xs font-bold uppercase tracking-widest ${t.textMuted}`}>Cumulative GPA</span>
+                              <div className={`text-3xl font-black mt-1 ${t.primary} flex items-center justify-center gap-2`}>
+                                <Calculator size={24}/> {isPremium ? studentDetails.cgpa : "🔒.🔒🔒"}
+                              </div>
+                            </div>
+                          </div>
+
+                          {!isPremium && (
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-300">
+                              <div className="flex items-center gap-3">
+                                <Lock size={20} className="text-amber-500" />
+                                <p className="text-sm font-medium">Standard Access: Sessional & Final marks are hidden.</p>
+                              </div>
+                              <button onClick={() => setShowUpgradeModal(true)} className="whitespace-nowrap px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors">
+                                Upgrade to Unlock All Marks
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Semester Tables */}
+                          {studentDetails.semesters.map((sem: any, sIdx: number) => (
+                            <div key={sIdx} className="space-y-3">
+                              <div className={`flex justify-between items-end border-b-2 ${theme === 'light' ? 'border-[#0056b3]' : 'border-amber-500'} pb-2`}>
+                                <h4 className={`font-bold text-lg ${theme === 'light' ? 'text-[#0056b3]' : 'text-amber-400'}`}>Semester {sem.semNum}</h4>
+                                <div className={`text-sm font-bold ${t.text}`}>SGPA: <span className={t.primary}>{isPremium || sem.semNum !== student.latestSem ? sem.sgpa : "🔒"}</span></div>
+                              </div>
+                              
+                              <div className={`overflow-x-auto rounded-xl border ${t.border} ${theme === 'light' ? 'bg-white shadow-sm' : 'bg-[#001c4d]'}`}>
+                                <table className="w-full text-left text-sm whitespace-nowrap">
+                                  <thead className={t.tableHeader}>
+                                    <tr>
+                                      <th className="px-4 py-3 font-semibold">Course</th>
+                                      <th className="px-4 py-3 text-center font-semibold">Mid</th>
+                                      <th className="px-4 py-3 text-center font-semibold">Sessional</th>
+                                      <th className="px-4 py-3 text-center font-semibold">Final</th>
+                                      <th className="px-4 py-3 text-center font-semibold">Total</th>
+                                      <th className="px-4 py-3 text-center font-semibold">Grade</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-200 dark:divide-[#00348c]">
+                                    {sem.courses.map((course: any, cIdx: number) => {
+                                      const isLatest = sem.semNum === student.latestSem;
+                                      const hideDetail = !isPremium && isLatest;
+
+                                      return (
+                                        <tr key={cIdx} className={t.rowHover}>
+                                          <td className="px-4 py-3">
+                                            <div className="font-bold">{course.name}</div>
+                                            <div className={`text-xs ${t.textMuted} font-mono mt-0.5`}>{course.code}</div>
+                                          </td>
+                                          <td className="px-4 py-3 text-center font-mono font-medium">{course.mid}</td>
+                                          <td className={`px-4 py-3 text-center font-mono ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>{course.sessional}</td>
+                                          <td className={`px-4 py-3 text-center font-mono ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>{course.final}</td>
+                                          <td className={`px-4 py-3 text-center font-mono font-bold ${hideDetail ? 'blur-sm select-none opacity-50' : t.primary}`}>{course.total}</td>
+                                          <td className="px-4 py-3 text-center">
+                                            <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold border ${theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-[#00122a] border-[#00348c] text-white'} ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>
+                                              {course.grade}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ))}
             </motion.div>
           )}
 
-          {/* No Results Fallback */}
-          {results && results.length === 0 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 border border-[#00348c] rounded-2xl bg-[#001c4d]/30">
-              <div className="bg-[#00205b] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-[#00348c]">
-                <Search className="text-blue-400" size={24} />
+          {searchResults && searchResults.length === 0 && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`text-center py-16 border ${t.border} rounded-2xl ${t.cardBg}`}>
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border ${t.border} ${theme === 'light' ? 'bg-slate-50 text-slate-400' : 'bg-[#00205b] text-blue-400'}`}>
+                <Search size={24} />
               </div>
-              <h3 className="text-lg font-bold text-white mb-1">No Records Found</h3>
-              <p className="text-blue-300 text-sm">Please verify your search parameters and try again.</p>
+              <h3 className="text-lg font-bold mb-1">No Records Found</h3>
+              <p className={`text-sm ${t.textMuted}`}>Please verify your search parameters and try again.</p>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* UPGRADE MODAL POPUP - IUB Themed */}
+        {/* PREMIUM UPGRADE MODAL */}
         <AnimatePresence>
           {showUpgradeModal && (
             <>
               <motion.div 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 onClick={() => setShowUpgradeModal(false)}
-                className="fixed inset-0 bg-[#000a18]/80 backdrop-blur-sm z-50"
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
               />
-              
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-[#001c4d] border border-[#00348c] p-6 sm:p-8 rounded-2xl shadow-2xl z-50"
+                className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md ${t.cardBg} border ${t.border} p-6 sm:p-8 rounded-2xl shadow-2xl z-50`}
               >
-                <button onClick={() => setShowUpgradeModal(false)} className="absolute top-4 right-4 text-blue-400 hover:text-white transition-colors bg-[#00122a] p-1.5 rounded-full border border-[#00348c]">
+                <button onClick={() => setShowUpgradeModal(false)} className={`absolute top-4 right-4 ${t.textMuted} hover:${t.text} transition-colors p-1.5 rounded-full border ${t.border}`}>
                   <X size={18} />
                 </button>
 
@@ -334,15 +385,15 @@ export default function DashboardPage() {
                   <div className="mx-auto w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center mb-4 text-[#00173d] shadow-lg shadow-amber-500/20">
                     <Award size={32} />
                   </div>
-                  <h2 className="text-2xl font-bold text-white mb-1">IUB Premium</h2>
-                  <p className="text-blue-300 text-sm">Unlock your full academic transcript instantly.</p>
+                  <h2 className="text-2xl font-bold mb-1">IUB Premium</h2>
+                  <p className={`text-sm ${t.textMuted}`}>Unlock your full academic transcript instantly.</p>
                 </div>
 
-                <div className="bg-[#00122a] border border-[#00348c] rounded-xl p-4 mb-6">
+                <div className={`border ${t.border} rounded-xl p-4 mb-6 ${theme === 'light' ? 'bg-slate-50' : 'bg-[#00122a]'}`}>
                   <ul className="space-y-3">
                     {['View Sessional Marks', 'View Final Exam Marks', 'Check Grades & Exact GPAs', 'Download Official PDF Transcript'].map((feature, i) => (
-                      <li key={i} className="flex items-center gap-3 text-sm text-blue-100 font-medium">
-                        <CheckCircle2 className="text-amber-400" size={18} /> {feature}
+                      <li key={i} className="flex items-center gap-3 text-sm font-medium">
+                        <CheckCircle2 className="text-amber-500" size={18} /> {feature}
                       </li>
                     ))}
                   </ul>
@@ -350,31 +401,15 @@ export default function DashboardPage() {
 
                 <div className="space-y-4">
                   <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center">
-                    <p className="text-xs text-amber-400 font-bold uppercase tracking-wide mb-1">Subscription Fee</p>
-                    <p className="text-3xl font-black text-white">Rs. 500<span className="text-sm font-normal text-blue-300"> / semester</span></p>
+                    <p className="text-xs text-amber-500 font-bold uppercase tracking-wide mb-1">Subscription Fee</p>
+                    <p className="text-3xl font-black">Rs. 500<span className={`text-sm font-normal ${t.textMuted}`}> / semester</span></p>
                   </div>
-
-                  <div className="text-center text-sm text-blue-200 px-4">
-                    Pay via EasyPaisa or JazzCash to the verified admin account below, then upload a screenshot.
-                  </div>
-
-                  <div className="bg-[#00122a] rounded-xl p-4 flex items-center justify-between border border-[#00348c]">
-                    <div className="flex items-center gap-3">
-                      <CreditCard className="text-blue-400" size={20} />
-                      <div className="text-left">
-                        <p className="text-xs text-blue-400 font-medium">EasyPaisa Account</p>
-                        <p className="text-sm font-mono text-white font-bold">03XX-XXXXXXX</p>
-                      </div>
-                    </div>
-                  </div>
-
                   <button 
                     onClick={() => {
                       setIsPremium(true);
                       setShowUpgradeModal(false);
-                      alert("Mock: Payment uploaded and approved! You are now Premium.");
                     }}
-                    className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] font-bold rounded-xl py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all"
+                    className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] font-bold rounded-xl py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
                   >
                     <Unlock size={18} /> Verify Payment
                   </button>
@@ -383,6 +418,7 @@ export default function DashboardPage() {
             </>
           )}
         </AnimatePresence>
+
       </div>
     </div>
   );
