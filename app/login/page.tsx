@@ -1,138 +1,161 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase Client
-// Ensure you have NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your .env.local file
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { Mail, Lock, Loader2, Sun, Moon } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phoneError, setPhoneError] = useState(false);
-  const [authError, setAuthError] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // Handle phone input formatting (adds the hyphen automatically)
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
-    
-    // Insert hyphen after the 4th digit
-    if (value.length > 4) {
-      value = value.substring(0, 4) + '-' + value.substring(4, 11);
+  // Handle Dark/Light mode toggle
+  useEffect(() => {
+    // Ensure light mode is default on initial load
+    document.documentElement.classList.remove('dark');
+  }, []);
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+    if (!isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
-    
-    setPhone(value);
-    setPhoneError(false); // Clear custom error when user starts typing again
   };
 
-  // Handle Form Submission
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthError(''); // Clear previous auth errors
-    
-    const rawNumber = phone.replace(/-/g, ''); // Remove hyphen for strict validation
+    setErrorMsg('');
 
-    // Validation Check: Must start with '03' and be 11 digits
-    if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
-      setPhoneError(true);
+    // Validation: Only allow @gmail.com
+    if (!email.toLowerCase().endsWith('@gmail.com')) {
+      setErrorMsg('Only @gmail.com email addresses are allowed.');
       return;
     }
 
     setIsLoading(true);
+
+    // Initialize Supabase inside the function to prevent Next.js build errors
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     try {
       // Query the custom 'users' table
       const { data, error } = await supabase
         .from('users')
         .select('id, reg, email, phone, created_at')
-        .eq('phone', phone) // Checking against formatted phone like '0300-1234567'
+        .eq('email', email)
         .eq('pass', password)
         .single();
 
       if (error || !data) {
-        setAuthError('Invalid phone number or password.');
+        setErrorMsg('Invalid email or password.');
         setIsLoading(false);
         return;
       }
 
-      // Success! 
+      // Success
       alert('Login successful! Welcome back.');
-      console.log('User Data:', data);
-      
-      // Redirect to a secure page (uncomment and modify to your actual dashboard route)
-      // router.push('/dashboard');
+      // router.push('/dashboard'); // Uncomment to redirect
 
     } catch (err) {
       console.error('Login error:', err);
-      setAuthError('An unexpected error occurred. Please try again.');
+      setErrorMsg('An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h2 className="mb-6 text-center text-2xl font-bold text-gray-800">Log In</h2>
+    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 transition-colors duration-300 dark:bg-gray-900 p-4">
+      
+      {/* Theme Toggle Button */}
+      <button
+        onClick={toggleTheme}
+        className="absolute top-6 right-6 p-2 rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+        aria-label="Toggle Dark Mode"
+      >
+        {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
+      </button>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl transition-colors duration-300 dark:bg-gray-800 dark:shadow-2xl">
+        <div className="mb-8 text-center">
+          <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">
+            Welcome Back
+          </h2>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Sign in to your account to continue
+          </p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-6">
           
-          {/* Phone Input Area */}
+          {/* Email Input */}
           <div>
-            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
-              Phone Number
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Email Address
             </label>
-            <input
-              type="tel"
-              id="phone"
-              value={phone}
-              onChange={handlePhoneChange}
-              placeholder="0300-1234567"
-              maxLength={12}
-              required
-              className="w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            {/* Custom Warning Error */}
-            {phoneError && (
-              <p className="mt-2 text-sm text-red-600 font-semibold">
-                you entering wrong number.. enter your correct number otherwise your account can be compromised
-              </p>
-            )}
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400 dark:text-gray-500">
+                <Mail size={20} />
+              </div>
+              <input
+                type="email"
+                id="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@gmail.com"
+                required
+                className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400"
+              />
+            </div>
           </div>
 
-          {/* Password Input Area */}
+          {/* Password Input */}
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Password
             </label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400 dark:text-gray-500">
+                <Lock size={20} />
+              </div>
+              <input
+                type="password"
+                id="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400"
+              />
+            </div>
           </div>
 
-          {/* General Auth Error (Database rejection) */}
-          {authError && (
-            <p className="text-sm text-red-600">{authError}</p>
+          {/* Error Message */}
+          {errorMsg && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">
+              {errorMsg}
+            </div>
           )}
 
           {/* Submit Button */}
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full rounded bg-blue-600 px-4 py-2 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 dark:focus:ring-offset-gray-900"
           >
-            {isLoading ? 'Logging in...' : 'Log In'}
+            {isLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              'Sign In'
+            )}
           </button>
           
         </form>
