@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr'; // ✅ Upgraded to SSR client
 import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft } from 'lucide-react';
 
 type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email';
@@ -26,11 +26,11 @@ export default function LoginPage() {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // --- SAFE SUPABASE INITIALIZATION ---
-  // This helper ensures Supabase is only created when needed and prevents Vercel build crashes
+  // ✅ Uses createBrowserClient so authentication sessions are stored in cookies for the middleware
   const getSupabase = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
-    return createClient(supabaseUrl, supabaseKey);
+    return createBrowserClient(supabaseUrl, supabaseKey);
   };
 
   // --- DARK MODE LOGIC ---
@@ -89,7 +89,7 @@ export default function LoginPage() {
       if (error || !data) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
-        // --- ADDED: Actual Supabase Auth Sign In so middleware recognizes the session ---
+        // --- Actual Supabase Auth Sign In ---
         const { error: authError } = await supabase.auth.signInWithPassword({
           email: data.email, 
           password: password,
@@ -99,8 +99,11 @@ export default function LoginPage() {
           setErrorMsg('Authentication error: ' + authError.message);
         } else {
           setSuccessMsg('Login successful! Welcome back.');
-          // Redirect immediately using a hard reload to ensure cookies are read
-          window.location.href = '/dashboard';
+          
+          // Small timeout gives the browser a split second to finish writing the cookie
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 500);
         }
       }
     } catch (err) {
@@ -129,7 +132,6 @@ export default function LoginPage() {
     const supabase = getSupabase();
 
     try {
-      // 1. Create user in Supabase Auth to trigger the Email OTP
       const { data, error: authError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -141,7 +143,6 @@ export default function LoginPage() {
         return;
       }
 
-      // 2. Save data to your custom table
       const { error } = await supabase
         .from('users')
         .insert([{ reg: rollNumber, phone, email, pass: password }]);
