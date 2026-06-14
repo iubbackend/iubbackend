@@ -99,9 +99,8 @@ export default function LoginPage() {
           setErrorMsg('Authentication error: ' + authError.message);
         } else {
           setSuccessMsg('Login successful! Welcome back.');
-          // Redirect to dashboard using Next.js router
-          router.push('/dashboard');
-          router.refresh();
+          // Redirect immediately using a hard reload to ensure cookies are read
+          window.location.href = '/dashboard';
         }
       }
     } catch (err) {
