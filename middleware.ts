@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
@@ -6,50 +6,56 @@ export async function middleware(request: NextRequest) {
     request: { headers: request.headers },
   })
 
-  // 1. Initialize the Supabase client utilizing cookies
+  // 1. Initialize Supabase client using modern getAll/setAll architecture
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+        getAll() {
+          return request.cookies.getAll()
         },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options })
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set({ name, value, ...options }))
           response = NextResponse.next({
             request: { headers: request.headers },
           })
-          response.cookies.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value: '', ...options })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set({ name, value, ...options })
+          )
         },
       },
     }
   )
 
-  // 2. Get the current user session
+  // 2. Safely extract user authentication status
   const { data: { user } } = await supabase.auth.getUser()
 
-  // 3. PROTECT ROUTE: If no user and trying to access dashboard -> Send to login
+  // 3. PROTECT ROUTE: If not logged in and accessing dashboard -> Redirect to login
   if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
   }
 
-  // 4. PREVENT DOUBLE LOGIN: If user is logged in and trying to go to login -> Send to dashboard
+  // 4. PREVENT DOUBLE LOGIN: If logged in and accessing login page -> Redirect to dashboard
   if (user && request.nextUrl.pathname.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+    const url = request.nextUrl.clone()
+    url.pathname = '/dashboard'
+    const redirectResponse = NextResponse.redirect(url)
+    
+    // Copy active session cookies over to the redirect response object
+    response.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value, cookie)
+    })
+    
+    return redirectResponse
   }
 
   return response
 }
 
-// Specify which routes this middleware should run on
+// Specify exactly which paths should trigger this authentication check
 export const config = {
   matcher: ['/dashboard/:path*', '/login'],
 }
