@@ -22,15 +22,16 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // Initialize Supabase (Safe for Next.js Client Side)
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  // --- SAFE SUPABASE INITIALIZATION ---
+  // This helper ensures Supabase is only created when needed and prevents Vercel build crashes
+  const getSupabase = () => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
+    return createClient(supabaseUrl, supabaseKey);
+  };
 
   // --- DARK MODE LOGIC ---
   useEffect(() => {
-    // Check system preference or localStorage on mount if you prefer, 
-    // but defaulting to light as requested.
     const isDark = document.documentElement.classList.contains('dark');
     setIsDarkMode(isDark);
   }, []);
@@ -55,10 +56,9 @@ export default function LoginPage() {
   const switchView = (newView: ViewState) => {
     setView(newView);
     clearMessages();
-    // Reset fields if needed, or keep them for user convenience
   };
 
-  // --- PHONE FORMATTER (Kept exactly as you had it) ---
+  // --- PHONE FORMATTER ---
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, ''); 
     if (value.length > 4) {
@@ -72,6 +72,8 @@ export default function LoginPage() {
     e.preventDefault();
     clearMessages();
     setIsLoading(true);
+
+    const supabase = getSupabase();
 
     try {
       const { data, error } = await supabase
@@ -99,7 +101,6 @@ export default function LoginPage() {
     e.preventDefault();
     clearMessages();
 
-    // Validations
     if (!email.toLowerCase().endsWith('@gmail.com')) {
       setErrorMsg('Only @gmail.com email addresses are allowed.');
       return;
@@ -111,6 +112,7 @@ export default function LoginPage() {
     }
 
     setIsLoading(true);
+    const supabase = getSupabase();
 
     try {
       const { error } = await supabase
@@ -143,6 +145,8 @@ export default function LoginPage() {
     }
 
     setIsLoading(true);
+    const supabase = getSupabase();
+
     try {
       const { data, error } = await supabase
         .from('users')
@@ -168,8 +172,9 @@ export default function LoginPage() {
     clearMessages();
     setIsLoading(true);
 
+    const supabase = getSupabase();
+
     try {
-      // First, verify the reg and email match in your custom table
       const { data, error: matchError } = await supabase
         .from('users')
         .select('id')
@@ -183,7 +188,6 @@ export default function LoginPage() {
         return;
       }
 
-      // If matched, trigger Supabase Auth OTP
       const { error } = await supabase.auth.resetPasswordForEmail(email);
       
       if (error) {
@@ -201,7 +205,6 @@ export default function LoginPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-gray-50 transition-colors duration-300 dark:bg-gray-900 p-4">
       
-      {/* Theme Toggle Button */}
       <button
         onClick={toggleTheme}
         className="absolute top-6 right-6 p-2 rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -211,7 +214,6 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl transition-colors duration-300 dark:bg-gray-800 dark:shadow-2xl">
         
-        {/* --- HEADER --- */}
         <div className="mb-8 text-center relative">
           {view !== 'login' && (
             <button 
@@ -235,7 +237,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* --- ERROR & SUCCESS MESSAGES --- */}
         {errorMsg && (
           <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400 font-semibold">
             {errorMsg}
@@ -247,9 +248,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* =======================
-            VIEW 1: LOGIN
-        ======================== */}
+        {/* VIEW 1: LOGIN */}
         {view === 'login' && (
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
@@ -304,9 +303,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* =======================
-            VIEW 2: SIGN UP
-        ======================== */}
+        {/* VIEW 2: SIGN UP */}
         {view === 'signup' && (
           <form onSubmit={handleSignup} className="space-y-4">
             <div>
@@ -351,9 +348,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* =======================
-            VIEW 3: FORGOT PASSWORD
-        ======================== */}
+        {/* VIEW 3: FORGOT PASSWORD */}
         {view === 'forgot_password' && (
           <form onSubmit={handleForgotPassword} className="space-y-5">
             <div>
@@ -379,9 +374,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* =======================
-            VIEW 4: FORGOT EMAIL
-        ======================== */}
+        {/* VIEW 4: FORGOT EMAIL */}
         {view === 'forgot_email' && (
           <form onSubmit={handleForgotEmail} className="space-y-5">
             <div>
