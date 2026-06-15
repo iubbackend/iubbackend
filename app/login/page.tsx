@@ -5,6 +5,15 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr'; // ✅ Upgraded to SSR client
 import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft } from 'lucide-react';
 
+// --- NATIVE BROWSER HASHING HELPER ---
+// Converts a plain text password into a secure SHA-256 hash string
+async function hashPassword(password: string) {
+  const msgBuffer = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email';
 
 export default function LoginPage() {
@@ -77,22 +86,26 @@ export default function LoginPage() {
     setIsLoading(true);
 
     const supabase = getSupabase();
+    
+    // Hash the password before checking the database
+    const hashedPassword = await hashPassword(password);
 
     try {
       const { data, error } = await supabase
         .from('users')
         .select('id, reg, email, phone')
         .eq('reg', rollNumber)
-        .eq('pass', password)
+        .eq('pass', hashedPassword) // Check against the hash
         .single();
 
       if (error || !data) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
         // --- Actual Supabase Auth Sign In ---
+        // Note: Supabase auth still expects the raw password to handle its own internal verification
         const { error: authError } = await supabase.auth.signInWithPassword({
           email: data.email, 
-          password: password,
+          password: password, 
         });
 
         if (authError) {
@@ -131,10 +144,13 @@ export default function LoginPage() {
     setIsLoading(true);
     const supabase = getSupabase();
 
+    // Hash the password before inserting into the custom table
+    const hashedPassword = await hashPassword(password);
+
     try {
       const { data, error: authError } = await supabase.auth.signUp({
         email: email,
-        password: password,
+        password: password, // Supabase Auth needs the raw text, it securely hashes it internally
       });
 
       if (authError) {
@@ -145,7 +161,7 @@ export default function LoginPage() {
 
       const { error } = await supabase
         .from('users')
-        .insert([{ reg: rollNumber, phone, email, pass: password }]);
+        .insert([{ reg: rollNumber, phone, email, pass: hashedPassword }]); // Insert the hash, not plain text
 
       if (error) {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
