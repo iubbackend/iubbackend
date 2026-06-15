@@ -1,19 +1,27 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Search, LogOut, Award, Lock, Unlock, CreditCard, CheckCircle2, 
-  X, ChevronDown, Sparkles, GraduationCap, Building, Calendar, Users, 
+  Search, LogOut, Award, CheckCircle2, 
+  X, ChevronDown, GraduationCap, Building, Calendar, Users, 
   Sun, Moon, ChevronRight, Calculator
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
-// Assumes the grading utility is created in the utils folder
-// import { calculateGPA, processStudentRecords, CourseRecord } from '@/app/utils/grading';
+// Initialize Supabase Client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
+
+interface FilterItem {
+  id: number;
+  label: string;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -31,10 +39,15 @@ export default function DashboardPage() {
   const [session, setSession] = useState("All");
   const [section, setSection] = useState("All");
   
-  const [filterOptions, setFilterOptions] = useState({
-    departments: ["BS Computer Science", "BS Software Engineering", "BS Information Technology"],
-    sessions: ["Fall 2020", "Spring 2021", "Fall 2021", "Spring 2022"],
-    sections: ["F20-BSCS-1", "F20-BSCS-2", "SP21-BSSE-1"]
+  // Dynamic Filter Data from Supabase
+  const [filterOptions, setFilterOptions] = useState<{
+    departments: FilterItem[];
+    sessions: FilterItem[];
+    sections: FilterItem[];
+  }>({
+    departments: [],
+    sessions: [],
+    sections: []
   });
 
   // Results & Expansion States
@@ -42,12 +55,46 @@ export default function DashboardPage() {
   const [expandedReg, setExpandedReg] = useState<string | null>(null);
   const [studentDetails, setStudentDetails] = useState<any | null>(null);
   
-  // Paywall States
-  const [isPremium, setIsPremium] = useState(false);
+  // Paywall set to true permanently as requested (no marks or GPAs will be hidden)
+  const [isPremium, setIsPremium] = useState(true);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  // Fetch true filter items on component mount
+  useEffect(() => {
+    async function fetchFilterData() {
+      try {
+        const [deptsRes, sessionsRes, sectionsRes] = await Promise.all([
+          supabase.from("departments").select("id, depart_name, depart_code"),
+          supabase.from("academic_sessions").select("id, session_code"),
+          supabase.from("sections").select("id, section_name")
+        ]);
+
+        setFilterOptions({
+          departments: (deptsRes.data || []).map(d => ({ id: d.id, label: `${d.depart_code} - ${d.depart_name}` })),
+          sessions: (sessionsRes.data || []).map(s => ({ id: s.id, label: s.session_code })),
+          sections: (sectionsRes.data || []).map(s => ({ id: s.id, label: s.section_name }))
+        });
+      } catch (error) {
+        console.error("Error loading filter drop-downs:", error);
+      }
+    }
+    fetchFilterData();
+  }, []);
 
   // Toggle Theme
   const toggleTheme = () => setTheme(prev => prev === "light" ? "dark" : "light");
+
+  // Helper to calculate Grade and Grade Points from total marks
+  const getGradeDetails = (marks: number) => {
+    if (marks >= 85) return { grade: "A", gp: 4.0 };
+    if (marks >= 80) return { grade: "A-", gp: 3.7 };
+    if (marks >= 75) return { grade: "B+", gp: 3.3 };
+    if (marks >= 70) return { grade: "B", gp: 3.0 };
+    if (marks >= 65) return { grade: "B-", gp: 2.7 };
+    if (marks >= 60) return { grade: "C+", gp: 2.3 };
+    if (marks >= 50) return { grade: "C", gp: 2.0 };
+    return { grade: "F", gp: 0.0 };
+  };
 
   // Dynamic Theme Classes
   const t = {
@@ -61,7 +108,7 @@ export default function DashboardPage() {
     inputFocus: theme === "light" ? "focus:border-[#0056b3] focus:ring-[#0056b3]/20" : "focus:border-amber-500 focus:ring-amber-500/50",
     btnPrimary: theme === "light" 
       ? "bg-[#0056b3] hover:bg-[#004494] text-white shadow-[#0056b3]/20" 
-      : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] shadow-amber-500/20",
+      : "bg-gradient-to-r from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 text-[#00173d] shadow-amber-500/20",
     tableHeader: theme === "light" ? "bg-[#0056b3] text-white" : "bg-[#00122a] text-blue-200",
     rowHover: theme === "light" ? "hover:bg-slate-50" : "hover:bg-[#00205b]/60"
   };
@@ -73,52 +120,135 @@ export default function DashboardPage() {
     setExpandedReg(null);
     setStudentDetails(null);
 
-    // Mock Database Fetch Logic
-    setTimeout(() => {
-      if (searchMode === "Name") {
-        setSearchResults([
-          { reg: "F20-BSCS-001", name: "Ahmed Ali", session: "Fall 2020", section: "F20-BSCS-1", latestSem: 8 },
-          { reg: "F20-BSCS-089", name: "Ahmed Khan", session: "Fall 2020", section: "F20-BSCS-2", latestSem: 8 }
-        ]);
+    try {
+      let query = supabase.from("students").select(`
+        id,
+        reg,
+        name,
+        academic_sessions ( session_code ),
+        sections ( section_name )
+      `);
+
+      if (searchMode === "Roll Number") {
+        query = query.ilike("reg", `%${searchQuery.trim()}%`);
       } else {
-        // Roll Number Direct Search - Auto Expand
-        setSearchResults([{ reg: searchQuery.toUpperCase(), name: "John Doe", session: "Fall 2020", section: "F20-BSCS-1", latestSem: 8 }]);
-        handleExpandResult(searchQuery.toUpperCase());
+        query = query.ilike("name", `%${searchQuery.trim()}%`);
+        
+        if (session !== "All") {
+          query = query.eq("session_id", parseInt(session));
+        }
+        if (section !== "All") {
+          query = query.eq("section_id", parseInt(section));
+        }
+        if (department !== "All") {
+          const { data: matchingResults } = await supabase
+            .from("results")
+            .select("student_id")
+            .eq("department_id", parseInt(department));
+          
+          const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
+          if (studentIds.length === 0) {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+          }
+          query = query.in("id", studentIds);
+        }
       }
+
+      const { data: studentsData, error } = await query;
+
+      if (error) throw error;
+
+      const formattedResults = (studentsData || []).map((student: any) => ({
+        id: student.id,
+        reg: student.reg,
+        name: student.name,
+        session: student.academic_sessions?.session_code || "Unknown Session",
+        section: student.sections?.section_name || "Unknown Section"
+      }));
+
+      setSearchResults(formattedResults);
+
+      // Auto-expand if single perfect match on Roll Number
+      if (searchMode === "Roll Number" && formattedResults.length === 1) {
+        handleExpandResult(formattedResults[0].reg, formattedResults[0].id);
+      }
+
+    } catch (err) {
+      console.error("Search Pipeline Failed:", err);
+      setSearchResults([]);
+    } finally {
       setIsSearching(false);
-    }, 800);
+    }
   };
 
-  const handleExpandResult = (reg: string) => {
+  const handleExpandResult = async (reg: string, studentId?: number) => {
     if (expandedReg === reg) {
-      setExpandedReg(null); // Collapse if already open
+      setExpandedReg(null);
       return;
     }
     setExpandedReg(reg);
-    
-    // Mock Fetch Detailed Semester Records
-    // In production: Process with calculateGPA & processStudentRecords from grading.ts
-    setStudentDetails({
-      cgpa: 3.84,
-      semesters: [
-        {
-          semNum: 8,
-          sgpa: 3.91,
-          courses: [
-            { code: "CS401", name: "Final Year Project II", mid: 28, sessional: 18, final: 45, total: 91, grade: "A" },
-            { code: "CS405", name: "Information Security", mid: 25, sessional: 16, final: 40, total: 81, grade: "B+" },
-          ]
-        },
-        {
-          semNum: 7,
-          sgpa: 3.75,
-          courses: [
-            { code: "CS400", name: "Final Year Project I", mid: 26, sessional: 19, final: 42, total: 87, grade: "A" },
-            { code: "CS311", name: "Artificial Intelligence", mid: 22, sessional: 15, final: 38, total: 75, grade: "B" },
-          ]
-        }
-      ]
-    });
+
+    const targetId = studentId || searchResults?.find(s => s.reg === reg)?.id;
+    if (!targetId) return;
+
+    try {
+      const { data: records, error } = await supabase
+        .from("results")
+        .select(`
+          id,
+          sessional_marks,
+          mid_term_marks,
+          end_term_marks,
+          practical_sessional_marks,
+          practical_final_marks,
+          total_marks,
+          subjects ( course_code, course_name, credit_hours )
+        `)
+        .eq("student_id", targetId);
+
+      if (error) throw error;
+
+      let totalPoints = 0;
+      let totalCredits = 0;
+
+      const coursesMapped = (records || []).map((rec: any) => {
+        const marks = Number(rec.total_marks) || 0;
+        const details = getGradeDetails(marks);
+        const credits = rec.subjects?.credit_hours || 3;
+
+        totalPoints += details.gp * credits;
+        totalCredits += credits;
+
+        return {
+          code: rec.subjects?.course_code || "N/A",
+          name: rec.subjects?.course_name || "Unknown Subject",
+          mid: rec.mid_term_marks || 0,
+          sessional: rec.sessional_marks || 0,
+          final: rec.end_term_marks || 0,
+          total: marks,
+          grade: details.grade
+        };
+      });
+
+      const calculatedCgpa = totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : "0.00";
+
+      // Display everything transparently under one complete academic transcript report
+      setStudentDetails({
+        cgpa: calculatedCgpa,
+        semesters: [
+          {
+            semNum: "Complete",
+            sgpa: calculatedCgpa,
+            courses: coursesMapped
+          }
+        ]
+      });
+
+    } catch (err) {
+      console.error("Failed to compile marks report:", err);
+    }
   };
 
   return (
@@ -128,7 +258,6 @@ export default function DashboardPage() {
         {/* HEADER */}
         <header className={`flex justify-between items-center mb-10 border-b ${t.border} pb-6`}>
           <div className="flex items-center gap-3">
-            {/* SVG Logo */}
             <div className={`h-12 w-12 rounded-xl flex items-center justify-center shadow-lg ${theme === 'light' ? 'bg-[#0056b3] text-white shadow-[#0056b3]/20' : 'bg-gradient-to-br from-amber-400 to-amber-600 text-[#00173D] shadow-amber-500/20'}`}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
@@ -137,10 +266,9 @@ export default function DashboardPage() {
             </div>
             <div>
               <h1 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
-                IUB Backend
-                {isPremium && <span className={`px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider font-bold border ${theme === 'light' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>PRO</span>}
+                IUB Analytics Portal
               </h1>
-              <p className={`text-xs ${t.textMuted} font-medium`}>Academic Result Portal</p>
+              <p className={`text-xs ${t.textMuted} font-medium`}>Academic Record Portal</p>
             </div>
           </div>
           
@@ -189,21 +317,21 @@ export default function DashboardPage() {
                     <Calendar className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
                     <select value={session} onChange={(e) => setSession(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
                       <option value="All">All Sessions</option>
-                      {filterOptions.sessions.map((s, i) => <option key={i} value={s}>{s}</option>)}
+                      {filterOptions.sessions.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                   </div>
                   <div className="flex-1 relative">
                     <Building className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
                     <select value={department} onChange={(e) => setDepartment(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
                       <option value="All">All Departments</option>
-                      {filterOptions.departments.map((d, i) => <option key={i} value={d}>{d}</option>)}
+                      {filterOptions.departments.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
                     </select>
                   </div>
                   <div className="flex-1 relative">
                     <Users className={`absolute left-3.5 top-3 ${t.textMuted}`} size={16} />
                     <select value={section} onChange={(e) => setSection(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-xl pl-10 pr-10 py-2.5 focus:outline-none ${t.inputFocus} text-sm transition-colors`}>
                       <option value="All">All Sections</option>
-                      {filterOptions.sections.map((s, i) => <option key={i} value={s}>{s}</option>)}
+                      {filterOptions.sections.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                   </div>
                 </motion.div>
@@ -252,12 +380,12 @@ export default function DashboardPage() {
                           <span className={`text-xs px-2 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-600' : 'bg-[#00122a] border-[#00348c] text-blue-300'}`}>{student.reg}</span>
                         </h3>
                         <p className={`text-sm ${t.textMuted} mt-0.5 flex items-center gap-1.5`}>
-                          <Building size={14}/> {student.session} • {student.section} <span className="mx-1">|</span> Semester {student.latestSem}
+                          <Building size={14}/> {student.session} • {student.section}
                         </p>
                       </div>
                     </div>
                     <button 
-                      onClick={() => handleExpandResult(student.reg)}
+                      onClick={() => handleExpandResult(student.reg, student.id)}
                       className={`px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${expandedReg === student.reg ? (theme === 'light' ? 'bg-slate-100 text-slate-700 border border-slate-200' : 'bg-[#00122a] text-white border border-[#00348c]') : t.btnPrimary}`}
                     >
                       {expandedReg === student.reg ? "Close Result" : "See Result"} 
@@ -265,7 +393,7 @@ export default function DashboardPage() {
                     </button>
                   </div>
 
-                  {/* Expanded Semester-Wise Result */}
+                  {/* Expanded Academic Report Transcript */}
                   <AnimatePresence>
                     {expandedReg === student.reg && studentDetails && (
                       <motion.div 
@@ -279,29 +407,17 @@ export default function DashboardPage() {
                             <div className="text-center">
                               <span className={`text-xs font-bold uppercase tracking-widest ${t.textMuted}`}>Cumulative GPA</span>
                               <div className={`text-3xl font-black mt-1 ${t.primary} flex items-center justify-center gap-2`}>
-                                <Calculator size={24}/> {isPremium ? studentDetails.cgpa : "🔒.🔒🔒"}
+                                <Calculator size={24}/> {studentDetails.cgpa}
                               </div>
                             </div>
                           </div>
 
-                          {!isPremium && (
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-300">
-                              <div className="flex items-center gap-3">
-                                <Lock size={20} className="text-amber-500" />
-                                <p className="text-sm font-medium">Standard Access: Sessional & Final marks are hidden.</p>
-                              </div>
-                              <button onClick={() => setShowUpgradeModal(true)} className="whitespace-nowrap px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors">
-                                Upgrade to Unlock All Marks
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Semester Tables */}
+                          {/* Subject Assessment Ledger Rows */}
                           {studentDetails.semesters.map((sem: any, sIdx: number) => (
                             <div key={sIdx} className="space-y-3">
                               <div className={`flex justify-between items-end border-b-2 ${theme === 'light' ? 'border-[#0056b3]' : 'border-amber-500'} pb-2`}>
-                                <h4 className={`font-bold text-lg ${theme === 'light' ? 'text-[#0056b3]' : 'text-amber-400'}`}>Semester {sem.semNum}</h4>
-                                <div className={`text-sm font-bold ${t.text}`}>SGPA: <span className={t.primary}>{isPremium || sem.semNum !== student.latestSem ? sem.sgpa : "🔒"}</span></div>
+                                <h4 className={`font-bold text-lg ${theme === 'light' ? 'text-[#0056b3]' : 'text-amber-400'}`}>Academic Ledger Report</h4>
+                                <div className={`text-sm font-bold ${t.text}`}>Cumulative Total GPA: <span className={t.primary}>{sem.sgpa}</span></div>
                               </div>
                               
                               <div className={`overflow-x-auto rounded-xl border ${t.border} ${theme === 'light' ? 'bg-white shadow-sm' : 'bg-[#001c4d]'}`}>
@@ -315,30 +431,25 @@ export default function DashboardPage() {
                                       <th className="px-4 py-3 text-center font-semibold">Total</th>
                                       <th className="px-4 py-3 text-center font-semibold">Grade</th>
                                     </tr>
-                                  </thead>
+                                   Nab>
                                   <tbody className="divide-y divide-slate-200 dark:divide-[#00348c]">
-                                    {sem.courses.map((course: any, cIdx: number) => {
-                                      const isLatest = sem.semNum === student.latestSem;
-                                      const hideDetail = !isPremium && isLatest;
-
-                                      return (
-                                        <tr key={cIdx} className={t.rowHover}>
-                                          <td className="px-4 py-3">
-                                            <div className="font-bold">{course.name}</div>
-                                            <div className={`text-xs ${t.textMuted} font-mono mt-0.5`}>{course.code}</div>
-                                          </td>
-                                          <td className="px-4 py-3 text-center font-mono font-medium">{course.mid}</td>
-                                          <td className={`px-4 py-3 text-center font-mono ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>{course.sessional}</td>
-                                          <td className={`px-4 py-3 text-center font-mono ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>{course.final}</td>
-                                          <td className={`px-4 py-3 text-center font-mono font-bold ${hideDetail ? 'blur-sm select-none opacity-50' : t.primary}`}>{course.total}</td>
-                                          <td className="px-4 py-3 text-center">
-                                            <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold border ${theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-[#00122a] border-[#00348c] text-white'} ${hideDetail ? 'blur-sm select-none opacity-50' : ''}`}>
-                                              {course.grade}
-                                            </span>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
+                                    {sem.courses.map((course: any, cIdx: number) => (
+                                      <tr key={cIdx} className={t.rowHover}>
+                                        <td className="px-4 py-3">
+                                          <div className="font-bold">{course.name}</div>
+                                          <div className={`text-xs ${t.textMuted} font-mono mt-0.5`}>{course.code}</div>
+                                        </td>
+                                        <td className="px-4 py-3 text-center font-mono font-medium">{course.mid}</td>
+                                        <td className="px-4 py-3 text-center font-mono">{course.sessional}</td>
+                                        <td className="px-4 py-3 text-center font-mono">{course.final}</td>
+                                        <td className={`px-4 py-3 text-center font-mono font-bold ${t.primary}`}>{course.total}</td>
+                                        <td className="px-4 py-3 text-center">
+                                          <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold border ${theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-[#00122a] border-[#00348c] text-white'}`}>
+                                            {course.grade}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
                                   </tbody>
                                 </table>
                               </div>
@@ -385,8 +496,8 @@ export default function DashboardPage() {
                   <div className="mx-auto w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center mb-4 text-[#00173d] shadow-lg shadow-amber-500/20">
                     <Award size={32} />
                   </div>
-                  <h2 className="text-2xl font-bold mb-1">IUB Premium</h2>
-                  <p className={`text-sm ${t.textMuted}`}>Unlock your full academic transcript instantly.</p>
+                  <h2 className="text-2xl font-bold mb-1">Analytics Verification</h2>
+                  <p className={`text-sm ${t.textMuted}`}>Premium status verified successfully.</p>
                 </div>
 
                 <div className={`border ${t.border} rounded-xl p-4 mb-6 ${theme === 'light' ? 'bg-slate-50' : 'bg-[#00122a]'}`}>
@@ -397,22 +508,6 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center">
-                    <p className="text-xs text-amber-500 font-bold uppercase tracking-wide mb-1">Subscription Fee</p>
-                    <p className="text-3xl font-black">Rs. 500<span className={`text-sm font-normal ${t.textMuted}`}> / semester</span></p>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setIsPremium(true);
-                      setShowUpgradeModal(false);
-                    }}
-                    className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-[#00173d] font-bold rounded-xl py-3.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
-                  >
-                    <Unlock size={18} /> Verify Payment
-                  </button>
                 </div>
               </motion.div>
             </>
