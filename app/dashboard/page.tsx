@@ -204,7 +204,7 @@ export default function DashboardPage() {
           practical_sessional_marks,
           practical_final_marks,
           total_marks,
-          subjects ( course_code, course_name, credit_hours )
+          subject_id ( course_code, course_name, credit_hours )
         `)
         .eq("student_id", targetId);
 
@@ -216,14 +216,14 @@ export default function DashboardPage() {
       const coursesMapped = (records || []).map((rec: any) => {
         const marks = Number(rec.total_marks) || 0;
         const details = getGradeDetails(marks);
-        const credits = rec.subjects?.credit_hours || 3;
+        const credits = rec.subject_id?.credit_hours || 3;
 
         totalPoints += details.gp * credits;
         totalCredits += credits;
 
         return {
-          code: rec.subjects?.course_code || "N/A",
-          name: rec.subjects?.course_name || "Unknown Subject",
+          code: rec.subject_id?.course_code || "N/A",
+          name: rec.subject_id?.course_name || "Unknown Subject",
           mid: rec.mid_term_marks || 0,
           sessional: rec.sessional_marks || 0,
           final: rec.end_term_marks || 0,
