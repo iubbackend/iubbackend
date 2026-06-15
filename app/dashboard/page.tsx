@@ -6,7 +6,7 @@ import {
   Search, Building, Calendar, Users, 
   Sun, Moon, ChevronDown, ChevronUp, Lock,
   Menu, CreditCard, History, Share2, Wallet,
-  CheckCircle2, X
+  CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
@@ -31,15 +31,15 @@ export default function DashboardPage() {
   const [theme, setTheme] = useState<Theme>("light");
   
   // App & User States
-  const [currentUser, setCurrentUser] = useState({ reg: "F20BSCS1M001", name: "Current Student" }); // Mock logged-in user
+  const [currentUser, setCurrentUser] = useState({ reg: "F20BSCS1M010", name: "Student" }); 
   const [credits, setCredits] = useState(0);
   const [useCredits, setUseCredits] = useState(false);
   const [freeAttempts, setFreeAttempts] = useState({ name: 3, result: 3 });
   
   // UI States
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
+  const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'error'|'info'} | null>(null);
 
   // Search States
   const [searchQuery, setSearchQuery] = useState("");
@@ -61,18 +61,25 @@ export default function DashboardPage() {
   const [expandedReg, setExpandedReg] = useState<string | null>(null);
   const [studentDetails, setStudentDetails] = useState<any | null>(null);
 
-  // Payment Form State
+  // Credits Page States
   const [paymentForm, setPaymentForm] = useState({ package: "", name: "", tid: "" });
+  const [historyLogs, setHistoryLogs] = useState<{deposits: any[], usage: any[]}>({ deposits: [], usage: [] });
+  const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        const [deptsRes, sessionsRes, sectionsRes, userCreditsRes] = await Promise.all([
+        const [deptsRes, sessionsRes, sectionsRes, userCreditsRes, studentNameRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
           supabase.from("sections").select("id, section_name"),
-          supabase.from("user_credits").select("*").eq("user_reg", currentUser.reg).single()
+          supabase.from("user_credits").select("*").eq("user_reg", currentUser.reg).single(),
+          supabase.from("students").select("name").eq("reg", currentUser.reg).single()
         ]);
+
+        if (studentNameRes.data) {
+          setCurrentUser(prev => ({ ...prev, name: studentNameRes.data.name }));
+        }
 
         setFilterOptions({
           departments: (deptsRes.data || []).map(d => ({ id: d.id, label: `${d.depart_code} - ${d.depart_name}` })),
@@ -83,8 +90,8 @@ export default function DashboardPage() {
         if (userCreditsRes.data) {
           setCredits(userCreditsRes.data.credits);
           setFreeAttempts({
-            name: Math.max(0, 3 - userCreditsRes.data.free_name_searches_today),
-            result: Math.max(0, 3 - userCreditsRes.data.free_reg_searches_today)
+            name: Math.max(0, 3 - (userCreditsRes.data.free_name_searches_today || 0)),
+            result: Math.max(0, 3 - (userCreditsRes.data.free_reg_searches_today || 0))
           });
         }
       } catch (error) {
@@ -94,7 +101,32 @@ export default function DashboardPage() {
     fetchInitialData();
   }, [currentUser.reg]);
 
-  const toggleTheme = () => setTheme(prev => prev === "light" ? "dark" : "light");
+  // Fetch History when entering Credits Tab
+  useEffect(() => {
+    if (activeTab === "credits") {
+      loadCreditsHistory();
+    }
+  }, [activeTab]);
+
+  const loadCreditsHistory = async () => {
+    setCreditsTabLoading(true);
+    try {
+      const [depRes, usageRes] = await Promise.all([
+        supabase.from("payments_record").select("*").eq("user_reg", currentUser.reg).order("created_at", { ascending: false }),
+        supabase.from("user_search_log").select("*").eq("searcher_reg", currentUser.reg).order("created_at", { ascending: false }).limit(20)
+      ]);
+      setHistoryLogs({ deposits: depRes.data || [], usage: usageRes.data || [] });
+    } catch (err) {
+      console.error("Failed to load history", err);
+    } finally {
+      setCreditsTabLoading(false);
+    }
+  };
+
+  const showToast = (title: string, desc: string, type: 'error'|'info' = 'error') => {
+    setToastMsg({ title, desc, type });
+    setTimeout(() => setToastMsg(null), 4000);
+  };
 
   const t = {
     bg: theme === "light" ? "bg-[#f8fafc]" : "bg-[#00122a]",
@@ -113,22 +145,28 @@ export default function DashboardPage() {
   };
 
   const logSearch = async (query: string, type: string, targetReg?: string) => {
-    await supabase.from("user_search_log").insert({
-      searcher_reg: currentUser.reg,
-      searcher_name: currentUser.name,
-      search_query: query,
-      search_type: type,
-      viewed_target_reg: targetReg || null
-    });
+    try {
+      const { error } = await supabase.from("user_search_log").insert({
+        searcher_reg: currentUser.reg,
+        searcher_name: currentUser.name,
+        search_query: query,
+        search_type: type,
+        viewed_target_reg: targetReg || null
+      });
+      // Important log to fix the "not functional" issue. Check your RLS policies in Supabase!
+      if (error) console.error("Search Log Insert Failed (Check RLS Policies):", error);
+    } catch (err) {
+      console.error("Search Log Exception:", err);
+    }
   };
 
   const handleSearch = async (e?: React.FormEvent, newPage = 0) => {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
     
-    // Check limits
+    // Check Free Name Limits
     if (!useCredits && searchMode === "Name" && freeAttempts.name <= 0) {
-      alert("No free name searches left today. Please use credits.");
+      showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
       return;
     }
 
@@ -148,15 +186,13 @@ export default function DashboardPage() {
         if (section !== "All") query = query.eq("section_id", parseInt(section));
       }
 
-      // Pagination 
       query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
-
       const { data, count, error } = await query;
+      
       if (error) throw error;
 
       if (searchMode === "Name" && !useCredits && newPage === 0) {
         setFreeAttempts(p => ({ ...p, name: p.name - 1 }));
-        // mock deducting attempt in db
       }
 
       setSearchResults((data || []).map((s: any) => ({
@@ -170,6 +206,7 @@ export default function DashboardPage() {
 
     } catch (err) {
       console.error("Search Failed:", err);
+      showToast("Error", "Could not complete search.", "error");
     } finally {
       setIsSearching(false);
     }
@@ -186,14 +223,14 @@ export default function DashboardPage() {
 
     if (useCredits) {
       if (credits < cost) {
-        alert(`Insufficient credits. You need ${cost} credits.`);
-        setPaymentModalOpen(true);
+        showToast("Insufficient Credits", `You need ${cost} credits to view this result.`, "error");
+        setActiveTab("credits"); // Redirect to Credits page
         return;
       }
       setCredits(p => p - cost);
     } else {
       if (freeAttempts.result <= 0) {
-        alert("No free result views left today. Please turn on credits.");
+        showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
         return;
       }
       setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
@@ -203,7 +240,6 @@ export default function DashboardPage() {
     logSearch(searchQuery, "View Result", reg);
 
     try {
-      // Secure Fetching: Omit columns if not using credits
       const columns = useCredits 
         ? "id, semester_num, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours)"
         : "id, semester_num, mid_term_marks, total_marks, subject_id (course_code, course_name)";
@@ -211,7 +247,6 @@ export default function DashboardPage() {
       const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId);
       if (error) throw error;
 
-      // Group by Semester
       const grouped = (records || []).reduce((acc: any, rec: any) => {
         const sem = rec.semester_num || "General";
         if (!acc[sem]) acc[sem] = [];
@@ -228,7 +263,6 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      // Sort semesters descending
       const sortedSemesters = Object.keys(grouped).sort((a, b) => Number(b) - Number(a)).map(sem => ({
         semNum: sem,
         courses: grouped[sem]
@@ -241,65 +275,82 @@ export default function DashboardPage() {
   };
 
   const handlePaymentSubmit = async () => {
-    if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return alert("Fill all fields");
-    await supabase.from("payments_record").insert({
-      user_reg: currentUser.reg,
-      package_id: paymentForm.package,
-      account_name: paymentForm.name,
-      tid_number: paymentForm.tid
-    });
-    alert("Payment submitted for approval!");
-    setPaymentModalOpen(false);
-    setPaymentForm({ package: "", name: "", tid: "" });
+    if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Please fill all payment details", "error");
+    try {
+      await supabase.from("payments_record").insert({
+        user_reg: currentUser.reg,
+        package_id: paymentForm.package,
+        account_name: paymentForm.name,
+        tid_number: paymentForm.tid
+      });
+      showToast("Success", "Payment submitted for approval!", "info");
+      setPaymentForm({ package: "", name: "", tid: "" });
+      loadCreditsHistory(); // Reload table
+    } catch(e) {
+      showToast("Error", "Submission failed", "error");
+    }
   };
 
   return (
     <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden`}>
       
+      {/* GLOBAL TOAST */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-xl border ${toastMsg.type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-500' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'} backdrop-blur-md`}
+          >
+            <AlertCircle size={20} />
+            <div>
+              <p className="text-sm font-bold">{toastMsg.title}</p>
+              <p className="text-xs opacity-90">{toastMsg.desc}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* HEADER */}
-      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-4 py-3 flex justify-between items-center`}>
-        <div className="flex items-center gap-3">
+      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-3 sm:px-4 py-3 flex justify-between items-center`}>
+        <div className="flex items-center gap-2 sm:gap-3">
           <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
             <Menu size={20} className={t.primary} />
           </button>
           
-          <div className="flex items-center gap-2">
-            {/* Custom SVG Logo */}
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className={t.primary}>
-              <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <div className="flex items-center gap-1.5 sm:gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
+            {/* Unique Custom Logo: Book/Shield + Analytics + Star/Premium feel */}
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className={t.primary}>
+              <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="fill-current opacity-20"/>
               <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 14l3-3 2 2 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <h1 className="text-base sm:text-lg font-bold tracking-tight hidden sm:block">IUB Result Portal</h1>
+            <h1 className="text-[13px] sm:text-lg font-black tracking-tight leading-none whitespace-nowrap">
+              IUB Result<span className={theme === 'light' ? 'text-[#0056b3]' : 'text-amber-500'}>Portal</span>
+            </h1>
           </div>
         </div>
         
-        <div className="flex items-center gap-3 sm:gap-4">
-          {/* Use Credits Toggle */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70 hidden sm:block">
               Use Credits
             </span>
             <button 
               onClick={() => setUseCredits(!useCredits)}
               className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
             >
-              <motion.div 
-                animate={{ x: useCredits ? 16 : 0 }} 
-                className="bg-white w-4 h-4 rounded-full shadow-sm"
-              />
+              <motion.div animate={{ x: useCredits ? 16 : 0 }} className="bg-white w-4 h-4 rounded-full shadow-sm"/>
             </button>
           </div>
 
-          {/* Credits Badge */}
           <button 
-            onClick={() => setPaymentModalOpen(true)}
+            onClick={() => setActiveTab("credits")}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
           >
             <Wallet size={14} className={t.primary} />
             <span>{credits.toLocaleString()}</span>
           </button>
 
-          <button onClick={toggleTheme} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'}`}>
+          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'} hidden sm:block`}>
             {theme === "light" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
@@ -314,21 +365,35 @@ export default function DashboardPage() {
               className={`fixed top-0 left-0 h-full w-64 ${t.cardBg} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
             >
               <div className="p-5 border-b border-white/10 flex justify-between items-center">
-                <h2 className="font-bold text-lg">Menu</h2>
+                <div className="flex items-center gap-2">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${t.btnPrimary}`}>
+                    {currentUser.name.charAt(0)}
+                  </div>
+                  <div className="leading-tight">
+                    <div className="text-sm font-bold truncate max-w-[120px]">{currentUser.name}</div>
+                    <div className={`text-[10px] font-mono ${t.textMuted}`}>{currentUser.reg}</div>
+                  </div>
+                </div>
                 <button onClick={() => setSidebarOpen(false)}><X size={20} className={t.textMuted} /></button>
               </div>
               <div className="p-3 flex-1 space-y-1">
                 <button onClick={() => { setActiveTab('home'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'home' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
                   <Search size={18} /> Search Portal
                 </button>
-                <button onClick={() => setPaymentModalOpen(true)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-500/10`}>
-                  <CreditCard size={18} /> Deposit Credits
+                <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
+                  <CreditCard size={18} /> Credits & Wallet
                 </button>
                 <button onClick={() => { setActiveTab('history'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'history' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
-                  <History size={18} /> Search History
+                  <History size={18} /> Unlock History
                 </button>
                 <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
                   <Share2 size={18} /> Referral Program
+                </button>
+              </div>
+              <div className="p-4 border-t border-white/10 flex justify-between items-center">
+                <span className="text-xs font-medium">Theme</span>
+                <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-2 rounded-lg border ${t.border}`}>
+                  {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
                 </button>
               </div>
             </motion.div>
@@ -338,19 +403,52 @@ export default function DashboardPage() {
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-6 py-6 z-10">
         
-        {/* Welcome Text */}
-        {activeTab === "home" && (
-          <div className="mb-6">
-            <h2 className="text-xl sm:text-2xl font-black tracking-tight">Welcome, {currentUser.name}</h2>
-            <p className={`text-xs sm:text-sm ${t.textMuted} font-medium mt-1`}>
-              Free attempts today: <span className="font-bold">{freeAttempts.name} Name</span> | <span className="font-bold">{freeAttempts.result} Result</span>
-            </p>
-          </div>
-        )}
-
-        {/* MAIN SEARCH PORTAL */}
+        {/* TAB: HOME (SEARCH PORTAL) */}
         {activeTab === "home" && (
           <>
+            {/* Beautiful Welcome Card */}
+            <div className={`relative overflow-hidden rounded-[1.5rem] p-5 sm:p-6 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
+              <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none transform translate-x-4 -translate-y-4">
+                <GraduationCap size={140} />
+              </div>
+              
+              <div className="relative z-10">
+                <h2 className="text-xl sm:text-2xl font-black mb-1">Welcome back, {currentUser.name}!</h2>
+                <p className="text-sm opacity-80 mb-5 max-w-sm">Here is your daily free search allowance. Toggle 'Use Credits' in the header to bypass limits.</p>
+                
+                <div className="flex flex-wrap gap-3 sm:gap-4">
+                  <div className={`flex-1 min-w-[140px] rounded-xl p-3 sm:p-4 backdrop-blur-md border ${theme === 'light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/50 border-blue-400/20'}`}>
+                    <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 opacity-80">
+                      <Search size={12}/> Name Search
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-black">
+                      {freeAttempts.name} <span className="text-xs sm:text-sm font-medium opacity-60">/ 3 today</span>
+                    </div>
+                  </div>
+                  
+                  <div className={`flex-1 min-w-[140px] rounded-xl p-3 sm:p-4 backdrop-blur-md border ${theme === 'light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/50 border-blue-400/20'}`}>
+                    <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 opacity-80">
+                      <Activity size={12}/> Result Views
+                    </div>
+                    <div className="text-2xl sm:text-3xl font-black">
+                      {freeAttempts.result} <span className="text-xs sm:text-sm font-medium opacity-60">/ 3 today</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Limit Warning */}
+                {(freeAttempts.name <= 0 || freeAttempts.result <= 0) && !useCredits && (
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
+                    className="mt-4 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2"
+                  >
+                    <Lock size={14}/> <span>Free attempts ended. Turn on <b>Use Credits</b> or check tomorrow.</span>
+                    <button onClick={() => setActiveTab('credits')} className="ml-auto underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
+                  </motion.div>
+                )}
+              </div>
+            </div>
+
+            {/* MAIN SEARCH CONTROLS */}
             <div className={`${t.cardBg} border ${t.border} p-4 sm:p-5 rounded-[1.25rem] shadow-sm mb-6 transition-all`}>
               <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-3 mb-1">
@@ -370,7 +468,6 @@ export default function DashboardPage() {
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
                       className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 overflow-hidden"
                     >
-                      {/* Nano Dropdowns */}
                       <div className="relative">
                         <Calendar className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
                         <select value={session} onChange={(e) => setSession(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
@@ -492,7 +589,6 @@ export default function DashboardPage() {
                 ))}
               </AnimatePresence>
 
-              {/* Next Button Pagination */}
               {searchResults && searchResults.length > 0 && searchResults.length < totalRecords && (
                 <button onClick={(e) => handleSearch(e, page + 1)} className={`w-full py-2.5 rounded-xl border ${t.border} ${t.cardBg} hover:bg-slate-500/5 text-sm font-bold transition-colors`}>
                   Load Next 10 Records
@@ -502,82 +598,74 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* MOCK TABS: History & Referral */}
-        {activeTab === "history" && (
-          <div className={`${t.cardBg} border ${t.border} p-6 rounded-2xl`}>
-            <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><History size={20}/> Search History</h3>
-            <p className="text-sm opacity-70">Saved unlocks will appear here. You don't spend credits to view already unlocked results (unless checking for updates via "See Latest").</p>
-            {/* Map through a history state here in future */}
-          </div>
-        )}
-
-        {activeTab === "referral" && (
-          <div className={`${t.cardBg} border ${t.border} p-6 rounded-2xl text-center`}>
-            <Share2 size={32} className={`mx-auto mb-3 ${t.primary}`} />
-            <h3 className="font-bold text-xl mb-2">Invite & Earn Credits</h3>
-            <p className="text-sm opacity-70 mb-6">Share your link. If a friend signs up and buys credits, you get 20% of their purchase value added to your wallet!</p>
-            <div className={`p-3 rounded-lg border ${t.border} bg-slate-500/5 font-mono text-xs flex justify-between items-center`}>
-              <span>https://iubresults.com/ref/{currentUser.reg}</span>
-              <button className={`${t.btnPrimary} px-3 py-1.5 rounded-md text-xs`}>Copy</button>
+        {/* TAB: CREDITS (DEDICATED MOBILE OPTIMIZED PAGE) */}
+        {activeTab === "credits" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl mx-auto">
+            {/* Wallet Overview */}
+            <div className={`p-6 rounded-[1.5rem] text-center border ${theme === 'light' ? 'bg-gradient-to-b from-white to-slate-50 border-slate-200 shadow-sm' : 'bg-gradient-to-b from-[#001c4d] to-[#00122a] border-[#00348c]'}`}>
+               <Wallet size={36} className={`mx-auto mb-3 ${t.primary}`}/>
+               <h3 className={`text-sm font-bold uppercase tracking-widest ${t.textMuted} mb-1`}>Available Balance</h3>
+               <div className="text-4xl sm:text-5xl font-black">{credits.toLocaleString()} <span className="text-xl font-medium opacity-50">CRD</span></div>
             </div>
-          </div>
-        )}
-      </main>
 
-      {/* DEPOSIT CREDITS MODAL */}
-      <AnimatePresence>
-        {paymentModalOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPaymentModalOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm ${t.cardBg} border ${t.border} p-5 rounded-[1.5rem] shadow-2xl z-50 max-h-[90vh] overflow-y-auto`}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-black flex items-center gap-2"><Wallet size={18} className={t.primary}/> Top-up Credits</h2>
-                <button onClick={() => setPaymentModalOpen(false)} className={`p-1.5 rounded-full bg-slate-500/10 hover:bg-slate-500/20`}><X size={16}/></button>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 mb-5">
+            {/* Top-up Plans */}
+            <div>
+              <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><TrendingUp size={18}/> Top-up Plans</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   { id: 'pkg1', price: 'Rs 500', credits: '10,000', label: 'Basic' },
-                  { id: 'pkg2', price: 'Rs 1000', credits: '25,000', label: 'Pro' },
+                  { id: 'pkg2', price: 'Rs 1000', credits: '25,000', label: 'Pro', pop: true },
                   { id: 'pkg3', price: 'Rs 5000', credits: 'Lifetime', label: 'Max (10/day)' },
                 ].map(pkg => (
                   <div key={pkg.id} onClick={() => setPaymentForm({ ...paymentForm, package: pkg.id })}
-                    className={`cursor-pointer p-3 rounded-xl border-2 transition-all ${paymentForm.package === pkg.id ? `border-amber-500 bg-amber-500/10` : `${t.border} bg-slate-500/5`}`}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all relative overflow-hidden ${paymentForm.package === pkg.id ? `border-amber-500 bg-amber-500/10` : `${t.border} ${t.cardBg}`}`}
                   >
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold">{pkg.price}</span>
-                      <span className={`text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Crd</span>
-                    </div>
+                    {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg">Popular</div>}
+                    <div className="text-xs font-bold opacity-70 mb-1">{pkg.label}</div>
+                    <div className="text-xl font-black mb-2">{pkg.price}</div>
+                    <div className={`inline-block text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Crd</div>
                   </div>
                 ))}
               </div>
+            </div>
 
+            {/* Payment Form (Shows only if a package is selected) */}
+            <AnimatePresence>
               {paymentForm.package && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
-                  <div className={`p-3 rounded-lg text-xs font-mono border ${t.border} bg-slate-500/5 text-center`}>
-                    <p className="opacity-70 mb-1">Transfer exact amount to:</p>
-                    <p className="font-bold text-sm">Meezan Bank: 01234567890</p>
-                    <p>Account Title: IUB Portal</p>
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className={`p-5 rounded-[1.25rem] border ${t.border} ${t.cardBg} space-y-4`}>
+                  <h4 className="font-bold text-sm">Complete Your Payment</h4>
+                  <div className={`p-3 rounded-lg text-xs font-mono border ${t.border} bg-slate-500/5`}>
+                    <p className="opacity-70 mb-1">Transfer exact amount via EasyPaisa/JazzCash/Bank to:</p>
+                    <p className={`font-bold text-sm ${t.primary}`}>Meezan Bank: 01234567890</p>
+                    <p>Account Title: IUB Portal Technologies</p>
                   </div>
                   
-                  <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input type="text" placeholder="Your Name on Bank Account" value={paymentForm.name} onChange={(e) => setPaymentForm({...paymentForm, name: e.target.value})}
-                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-3 mb-2 text-sm focus:outline-none ${t.inputFocus}`} />
+                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 text-sm focus:outline-none ${t.inputFocus}`} />
                     <input type="text" placeholder="TID Number of Receipt" value={paymentForm.tid} onChange={(e) => setPaymentForm({...paymentForm, tid: e.target.value})}
-                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-3 text-sm focus:outline-none ${t.inputFocus}`} />
+                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 text-sm focus:outline-none ${t.inputFocus}`} />
                   </div>
-                  <button onClick={handlePaymentSubmit} className={`w-full ${t.btnPrimary} font-bold rounded-xl py-3 flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm`}>
-                    <CheckCircle2 size={16}/> I have Paid
+                  <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm`}>
+                    <CheckCircle2 size={16}/> Submit Payment Verification
                   </button>
                 </motion.div>
               )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+            </AnimatePresence>
 
-    </div>
-  );
-}
+            {/* Credits Usage & Deposit History */}
+            <div className={`rounded-[1.25rem] border ${t.border} ${t.cardBg} overflow-hidden`}>
+               <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
+                 <h3 className="font-bold text-sm flex items-center gap-2"><History size={16}/> Transactions & Usage</h3>
+                 {creditsTabLoading && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin opacity-50" />}
+               </div>
+               
+               <div className="p-0 overflow-x-auto">
+                 {/* Mix of deposits and usage for display */}
+                 <table className="w-full text-left text-xs whitespace-nowrap">
+                   <thead className={`bg-slate-500/5 text-opacity-80`}>
+                     <tr>
+                       <th className="px-4 py-2 font-bold">Date</th>
+                       <th className="px-4 py-2 font-bold">Type</th>
+                       <th className="px-4 py-2 font-bold">Details</th>
+                       <th className="px-4 py-2 text-right font-bold">Status/
