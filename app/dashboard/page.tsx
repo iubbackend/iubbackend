@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
-import Select from 'react-select'; // Added for searchable dropdowns
+import Select from 'react-select'; 
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -25,7 +25,7 @@ type Theme = "light" | "dark";
 interface FilterItem {
   id: number;
   label: string;
-  value: string; // Required for react-select
+  value: string;
   session_id?: number;
   department_id?: number;
 }
@@ -70,7 +70,6 @@ export default function DashboardPage() {
   const [page, setPage] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
   
-  // React-Select States
   const [selectedDept, setSelectedDept] = useState<FilterItem | null>(null);
   const [selectedSession, setSelectedSession] = useState<FilterItem | null>(null);
   const [selectedSection, setSelectedSection] = useState<FilterItem | null>(null);
@@ -87,13 +86,22 @@ export default function DashboardPage() {
   const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
-  // Admin States
+  // REAL ADMIN STATES
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [adminStats, setAdminStats] = useState({
+    sales: 0,
+    pending: 0,
+    totalUsers: 0,
+    premiumUsers: 0,
+    profit: 0,
+    searches: 0
+  });
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
 
         if (!session?.user?.email) {
           router.push('/login');
@@ -103,19 +111,20 @@ export default function DashboardPage() {
         let actualReg = "UNKNOWN";
         const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).maybeSingle();
         if (userRecord?.reg) {
-          actualReg = userRecord.reg;
+          actualReg = userRecord.reg.toUpperCase(); // Force Uppercase to fix matching issues
         }
 
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          const { data: studentNameRes } = await supabase.from("students").select("name").eq("reg", actualReg).maybeSingle();
+          // ILIKE makes the search case-insensitive just in case
+          const { data: studentNameRes } = await supabase.from("students").select("name").ilike("reg", actualReg).maybeSingle();
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
 
         setCurrentUser({ reg: actualReg, name: actualName });
 
         if (actualReg !== "UNKNOWN") {
-          const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).maybeSingle();
+          const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
           if (userCreditsRes) {
             setCredits(userCreditsRes.credits || 0);
             setFreeAttempts(Math.max(0, 4 - (userCreditsRes.free_searches_today || 0)));
@@ -125,7 +134,6 @@ export default function DashboardPage() {
           }
         }
 
-        // Fetch Filters
         const [deptsRes, sessionsRes, sectionsRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
@@ -138,9 +146,9 @@ export default function DashboardPage() {
           sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
         });
 
-        // Load Admin Pending Approvals if Admin
+        // Load Real Admin Data if Admin
         if (actualReg === ADMIN_REG) {
-          loadPendingApprovals();
+          loadRealAdminData();
         }
 
       } catch (error) {
@@ -155,13 +163,46 @@ export default function DashboardPage() {
     if (activeTab === "credits") loadCreditsHistory();
   }, [activeTab]);
 
+  const loadRealAdminData = async () => {
+    try {
+      // 1. Get Pending Approvals Table Data
+      const { data: pendingData } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+      setPendingApprovals(pendingData || []);
+
+      // 2. Get Aggregated Stats
+      const { data: approvedPayments } = await supabase.from('payments_record').select('amount').eq('status', 'approved');
+      const totalProfit = approvedPayments?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0;
+      const totalSales = approvedPayments?.length || 0;
+
+      const { count: userCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+      const { count: premiumCount } = await supabase.from('user_credits').select('*', { count: 'exact', head: true }).gt('credits', 0);
+      const { count: searchCount } = await supabase.from('user_search_log').select('*', { count: 'exact', head: true });
+
+      setAdminStats({
+        sales: totalSales,
+        pending: pendingData?.length || 0,
+        totalUsers: userCount || 0,
+        premiumUsers: premiumCount || 0,
+        profit: totalProfit,
+        searches: searchCount || 0
+      });
+
+      // 3. Get Top Users for Leaderboard (Highest Credits)
+      const { data: topUsers } = await supabase.from('user_credits').select('user_reg, credits').order('credits', { ascending: false }).limit(10);
+      setLeaderboard(topUsers || []);
+
+    } catch (e) {
+      console.error("Failed to load admin stats", e);
+    }
+  };
+
   const loadCreditsHistory = async () => {
     setCreditsTabLoading(true);
     try {
       if (!currentUser.reg) return;
       const [depRes, usageRes] = await Promise.all([
-        supabase.from("payments_record").select("*").eq("user_reg", currentUser.reg).order("created_at", { ascending: false }),
-        supabase.from("user_search_log").select("*").eq("searcher_reg", currentUser.reg).order("created_at", { ascending: false }).limit(20)
+        supabase.from("payments_record").select("*").ilike("user_reg", currentUser.reg).order("created_at", { ascending: false }),
+        supabase.from("user_search_log").select("*").ilike("searcher_reg", currentUser.reg).order("created_at", { ascending: false }).limit(20)
       ]);
       setHistoryLogs({ deposits: depRes.data || [], usage: usageRes.data || [] });
     } catch (err) {
@@ -171,42 +212,24 @@ export default function DashboardPage() {
     }
   };
 
-  const loadPendingApprovals = async () => {
-    try {
-      const { data } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
-      setPendingApprovals(data || []);
-    } catch (e) {
-      console.error("Failed to load approvals", e);
-    }
-  };
-
   const handleAdminApprove = async (paymentId: string, reg: string, amount: number) => {
     try {
-      // 1. Mark as approved
-      await supabase.from('payments_record').update({ status: 'approved' }).eq('id', paymentId);
+      // Force uppercase for matching
+      const targetReg = reg.toUpperCase();
       
-      // 2. Determine Credits (Example: 20 credits per Rs 1)
-      const creditsToAdd = amount * 20;
+      const { error } = await supabase.rpc('approve_payment_and_credit', {
+        p_payment_id: paymentId,
+        p_user_reg: targetReg,
+        p_amount: amount
+      });
 
-      // 3. Add to user
-      const { data: userWallet } = await supabase.from('user_credits').select('credits').eq('user_reg', reg).single();
-      const currentCredits = userWallet?.credits || 0;
-      await supabase.from('user_credits').update({ credits: currentCredits + creditsToAdd }).eq('user_reg', reg);
+      if (error) throw error;
 
-      // 4. Handle Referral Bonus (20%)
-      const { data: userRef } = await supabase.from('user_credits').select('referred_by').eq('user_reg', reg).single();
-      if (userRef?.referred_by) {
-        const bonusCredits = creditsToAdd * 0.20;
-        const { data: referrerWallet } = await supabase.from('user_credits').select('credits').eq('user_reg', userRef.referred_by).single();
-        if (referrerWallet) {
-           await supabase.from('user_credits').update({ credits: (referrerWallet.credits || 0) + bonusCredits }).eq('user_reg', userRef.referred_by);
-        }
-      }
-
-      showToast("Approved", `Approved Rs ${amount} for ${reg}.`, "info");
-      loadPendingApprovals();
+      showToast("Approved", `Approved Rs ${amount} for ${targetReg}.`, "info");
+      loadRealAdminData(); // Refresh all live admin stats
     } catch (e) {
-      showToast("Error", "Failed to approve payment", "error");
+      console.error(e);
+      showToast("Error", "Failed to approve payment. Check RPC function in Supabase.", "error");
     }
   };
 
@@ -240,7 +263,6 @@ export default function DashboardPage() {
     rowHover: theme === "light" ? "hover:bg-slate-50/50" : "hover:bg-[#00205b]/40"
   };
 
-  // React-Select Custom Styles
   const selectStyles = {
     control: (base: any, state: any) => ({
       ...base,
@@ -279,11 +301,11 @@ export default function DashboardPage() {
   const logSearch = async (query: string, type: string, targetReg?: string) => {
     try {
       await supabase.from("user_search_log").insert({
-        searcher_reg: currentUser.reg,
+        searcher_reg: currentUser.reg.toUpperCase(),
         searcher_name: currentUser.name,
         search_query: query,
         search_type: type,
-        viewed_target_reg: targetReg || null
+        viewed_target_reg: targetReg ? targetReg.toUpperCase() : null
       });
     } catch (err) {
       console.error("Search Log Exception:", err);
@@ -299,7 +321,7 @@ export default function DashboardPage() {
     const newCount = freeAttempts - 1;
     setFreeAttempts(newCount);
     try {
-      await supabase.from("user_credits").update({ free_searches_today: 4 - newCount }).eq("user_reg", currentUser.reg);
+      await supabase.from("user_credits").update({ free_searches_today: 4 - newCount }).ilike("user_reg", currentUser.reg);
     } catch (e) {
       console.error("Failed to sync free attempts", e);
     }
@@ -376,8 +398,10 @@ export default function DashboardPage() {
       return;
     }
 
+    const targetRegUpper = reg.toUpperCase();
+
     if (!isAdmin) {
-      const isOwnResult = reg.toLowerCase() === currentUser.reg.toLowerCase();
+      const isOwnResult = targetRegUpper === currentUser.reg.toUpperCase();
       const cost = isOwnResult ? 100 : 200;
 
       if (useCredits) {
@@ -388,16 +412,23 @@ export default function DashboardPage() {
         }
         setCredits(p => p - cost);
       } else {
-        if (!viewedRegsThisSession.includes(reg)) {
+        if (!viewedRegsThisSession.includes(targetRegUpper)) {
           const allowed = await deductFreeAttempt();
           if (!allowed) return;
-          setViewedRegsThisSession(prev => [...prev, reg]);
+          setViewedRegsThisSession(prev => [...prev, targetRegUpper]);
         }
       }
     }
 
     setExpandedReg(reg);
-    logSearch(searchQuery, "View Result", reg);
+    logSearch(searchQuery, "View Result", targetRegUpper);
+
+    if (!useCredits && !isAdmin) {
+      await supabase
+        .from("user_credits")
+        .update({ free_searches_today: 4 - freeAttempts }) // Ensure sync
+        .ilike("user_reg", currentUser.reg);
+    }
 
     try {
       const columns = (isAdmin || useCredits)
@@ -461,7 +492,7 @@ export default function DashboardPage() {
 
     try {
       await supabase.from("payments_record").insert({
-        user_reg: currentUser.reg,
+        user_reg: currentUser.reg.toUpperCase(),
         package_id: paymentForm.package,
         amount: finalAmount,
         account_name: paymentForm.name,
@@ -478,7 +509,6 @@ export default function DashboardPage() {
   return (
     <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden`}>
       
-      {/* GLOBAL TOAST */}
       <AnimatePresence>
         {toastMsg && (
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
@@ -493,7 +523,6 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      {/* HEADER */}
       <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-2 sm:px-4 py-3 flex justify-between items-center`}>
         <div className="flex items-center gap-1.5 sm:gap-3">
           <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
@@ -551,7 +580,6 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* THIN NANO SUB-HEADER */}
       <div className={`w-full py-1.5 text-[9px] sm:text-[11px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-3 border-b ${t.border} ${theme === 'light' ? 'bg-slate-100/80 text-slate-500' : 'bg-[#000a1a]/80 text-blue-400/60'}`}>
         <span>Check Result Before time</span>
         <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
@@ -560,7 +588,6 @@ export default function DashboardPage() {
         <span>Other's Result</span>
       </div>
 
-      {/* SIDEBAR DRAWER */}
       <AnimatePresence>
         {sidebarOpen && (
           <>
@@ -615,7 +642,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
                     <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CreditCard size={12}/> Sales</div>
-                    <div className="text-xl font-black">142</div>
+                    <div className="text-xl font-black">{adminStats.sales}</div>
                   </div>
                   <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg} relative`}>
                     {pendingApprovals.length > 0 && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
@@ -624,32 +651,61 @@ export default function DashboardPage() {
                   </div>
                   <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
                     <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><UsersRound size={12}/> Total Users</div>
-                    <div className="text-xl font-black">8,245</div>
+                    <div className="text-xl font-black">{adminStats.totalUsers}</div>
                   </div>
                   <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
                     <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><DollarSign size={12}/> Profit Earned</div>
-                    <div className="text-xl font-black text-emerald-500">Rs 85,400</div>
+                    <div className="text-xl font-black text-emerald-500">Rs {adminStats.profit.toLocaleString()}</div>
                   </div>
                 </div>
 
-                <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
-                  <h3 className="font-bold text-sm mb-3">Pending Payment Approvals</h3>
-                  <div className="space-y-2">
-                    {pendingApprovals.length === 0 && <p className="text-xs opacity-50">No pending approvals.</p>}
-                    {pendingApprovals.map((p) => (
-                      <div key={p.id} className="flex justify-between items-center p-3 border border-slate-500/20 rounded-lg hover:bg-slate-500/5">
-                        <div>
-                          <p className="font-bold text-sm">{p.user_reg}</p>
-                          <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Pending Approvals */}
+                  <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                    <h3 className="font-bold text-sm mb-3">Pending Payment Approvals</h3>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {pendingApprovals.length === 0 && <p className="text-xs opacity-50">No pending approvals.</p>}
+                      {pendingApprovals.map((p) => (
+                        <div key={p.id} className="flex justify-between items-center p-3 border border-slate-500/20 rounded-lg hover:bg-slate-500/5">
+                          <div>
+                            <p className="font-bold text-sm">{p.user_reg}</p>
+                            <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
+                          </div>
+                          <button 
+                            onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-md font-bold text-xs transition-colors"
+                          >
+                            Approve
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-md font-bold text-xs transition-colors"
-                        >
-                          Approve
-                        </button>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Leaderboard */}
+                  <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><Crown size={16} className="text-amber-500"/> Referral / Credits Leaderboard</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs whitespace-nowrap">
+                        <thead className={`bg-slate-500/5 text-opacity-80`}>
+                          <tr>
+                            <th className="px-3 py-2 font-bold rounded-tl-lg">Rank</th>
+                            <th className="px-3 py-2 font-bold">Registration</th>
+                            <th className="px-3 py-2 font-bold text-right rounded-tr-lg">Credits Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-500/10">
+                          {leaderboard.length === 0 && <tr><td colSpan={3} className="text-center py-4 opacity-50">No records found.</td></tr>}
+                          {leaderboard.map((user, i) => (
+                            <tr key={user.user_reg} className="hover:bg-slate-500/5">
+                              <td className={`px-3 py-2 font-black ${i===0 ? 'text-amber-500' : 'opacity-70'}`}>#{i+1}</td>
+                              <td className="px-3 py-2 font-semibold">{user.user_reg}</td>
+                              <td className="px-3 py-2 text-right font-bold text-emerald-500">{user.credits?.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -666,7 +722,6 @@ export default function DashboardPage() {
                     <h2 className="text-xl sm:text-3xl font-black mb-1">Welcome back, {formatFirstName(currentUser.name)}!</h2>
                   </div>
                   
-                  {/* Live Database */}
                   <div className="flex flex-col items-end gap-2">
                     <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
                       <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
