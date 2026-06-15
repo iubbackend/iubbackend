@@ -207,7 +207,14 @@ export default function DashboardPage() {
       if (error) throw error;
 
       if (searchMode === "Name" && !useCredits && newPage === 0) {
+        // 1. Decrement attempts locally
         setFreeAttempts(p => ({ ...p, name: p.name - 1 }));
+        
+        // 2. Persist the incremented usage count to Supabase
+        await supabase
+          .from("user_credits")
+          .update({ free_name_searches_today: 3 - (freeAttempts.name - 1) })
+          .eq("user_reg", currentUser.reg);
       }
 
       setSearchResults((data || []).map((s: any) => ({
@@ -252,7 +259,16 @@ export default function DashboardPage() {
     }
 
     setExpandedReg(reg);
-    logSearch(searchQuery, "View Result", reg);
+logSearch(searchQuery, "View Result", reg);
+
+// If the user used a free attempt, save the updated count to Supabase
+if (!useCredits) {
+  setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
+  await supabase
+    .from("user_credits")
+    .update({ free_reg_searches_today: 3 - (freeAttempts.result - 1) })
+    .eq("user_reg", currentUser.reg);
+}
 
     try {
       const columns = useCredits 
