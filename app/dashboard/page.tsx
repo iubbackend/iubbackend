@@ -49,7 +49,7 @@ export default function DashboardPage() {
   const [theme, setTheme] = useState<Theme>("light");
   
   // App & User States
-  const [currentUser, setCurrentUser] = useState({ reg: "F20BSCS1M010", name: "Student" }); 
+  const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading..." });
   const [credits, setCredits] = useState(0);
   const [useCredits, setUseCredits] = useState(false);
   const [freeAttempts, setFreeAttempts] = useState({ name: 3, result: 3 });
@@ -87,17 +87,40 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchInitialData() {
       try {
+        // 1. GET AUTH SESSION: Check who securely logged in via Supabase Auth
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+        if (!session?.user?.email) {
+          // If no one is logged in, kick them back to the login page
+          router.push('/login');
+          return;
+        }
+
+        // 2. GET REG NUMBER: Match the logged-in email to your 'users' table
+        const { data: userRecord, error: userError } = await supabase
+          .from("users")
+          .select("reg")
+          .eq("email", session.user.email)
+          .single();
+
+        if (userError || !userRecord) throw new Error("Could not find registration number for this email.");
+
+        const actualReg = userRecord.reg; // This is the real Roll Number
+
+        // 3. FETCH EVERYTHING ELSE using the real actualReg
         const [deptsRes, sessionsRes, sectionsRes, userCreditsRes, studentNameRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
           supabase.from("sections").select("id, section_name"),
-          supabase.from("user_credits").select("*").eq("user_reg", currentUser.reg).single(),
-          supabase.from("students").select("name").eq("reg", currentUser.reg).single()
+          supabase.from("user_credits").select("*").eq("user_reg", actualReg).single(),
+          supabase.from("students").select("name").eq("reg", actualReg).single()
         ]);
 
-        if (studentNameRes.data) {
-          setCurrentUser(prev => ({ ...prev, name: studentNameRes.data.name }));
-        }
+        // 4. Update the Dashboard UI with the Real User Data
+        setCurrentUser({ 
+          reg: actualReg, 
+          name: studentNameRes.data?.name || "Student" // Fallback if name is missing in students table
+        });
 
         setFilterOptions({
           departments: (deptsRes.data || []).map(d => ({ id: d.id, label: `${d.depart_code} - ${d.depart_name}` })),
@@ -116,8 +139,9 @@ export default function DashboardPage() {
         console.error("Error loading initial data:", error);
       }
     }
+    
     fetchInitialData();
-  }, [currentUser.reg]);
+  }, [router]); // Empty dependency array removed currentUser.reg to prevent infinite loops
 
   useEffect(() => {
     if (activeTab === "credits") {
