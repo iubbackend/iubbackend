@@ -431,7 +431,7 @@ export default function DashboardPage() {
                                       <th className="px-4 py-3 text-center font-semibold">Total</th>
                                       <th className="px-4 py-3 text-center font-semibold">Grade</th>
                                     </tr>
-                                   Nab>
+                                   </thead>
                                   <tbody className="divide-y divide-slate-200 dark:divide-[#00348c]">
                                     {sem.courses.map((course: any, cIdx: number) => (
                                       <tr key={cIdx} className={t.rowHover}>
