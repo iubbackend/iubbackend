@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Building, Calendar, Users, 
@@ -24,6 +24,24 @@ interface FilterItem {
   label: string;
 }
 
+// Extracted Interfaces to prevent Vercel SWC Compiler Panics
+interface FilterOptions {
+  departments: FilterItem[];
+  sessions: FilterItem[];
+  sections: FilterItem[];
+}
+
+interface ToastMessage {
+  title: string;
+  desc: string;
+  type: 'error' | 'info';
+}
+
+interface HistoryLogs {
+  deposits: any[];
+  usage: any[];
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   
@@ -39,7 +57,7 @@ export default function DashboardPage() {
   // UI States
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
-  const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'error'|'info'} | null>(null);
+  const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
 
   // Search States
   const [searchQuery, setSearchQuery] = useState("");
@@ -52,7 +70,7 @@ export default function DashboardPage() {
   const [department, setDepartment] = useState("All");
   const [session, setSession] = useState("All");
   const [section, setSection] = useState("All");
-  const [filterOptions, setFilterOptions] = useState<{ departments: FilterItem[]; sessions: FilterItem[]; sections: FilterItem[]; }>({
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     departments: [], sessions: [], sections: []
   });
 
@@ -63,7 +81,7 @@ export default function DashboardPage() {
 
   // Credits Page States
   const [paymentForm, setPaymentForm] = useState({ package: "", name: "", tid: "" });
-  const [historyLogs, setHistoryLogs] = useState<{deposits: any[], usage: any[]}>({ deposits: [], usage: [] });
+  const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
   useEffect(() => {
@@ -101,7 +119,6 @@ export default function DashboardPage() {
     fetchInitialData();
   }, [currentUser.reg]);
 
-  // Fetch History when entering Credits Tab
   useEffect(() => {
     if (activeTab === "credits") {
       loadCreditsHistory();
@@ -153,8 +170,7 @@ export default function DashboardPage() {
         search_type: type,
         viewed_target_reg: targetReg || null
       });
-      // Important log to fix the "not functional" issue. Check your RLS policies in Supabase!
-      if (error) console.error("Search Log Insert Failed (Check RLS Policies):", error);
+      if (error) console.error("Search Log Insert Failed:", error);
     } catch (err) {
       console.error("Search Log Exception:", err);
     }
@@ -164,7 +180,6 @@ export default function DashboardPage() {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
     
-    // Check Free Name Limits
     if (!useCredits && searchMode === "Name" && freeAttempts.name <= 0) {
       showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
       return;
@@ -224,7 +239,7 @@ export default function DashboardPage() {
     if (useCredits) {
       if (credits < cost) {
         showToast("Insufficient Credits", `You need ${cost} credits to view this result.`, "error");
-        setActiveTab("credits"); // Redirect to Credits page
+        setActiveTab("credits");
         return;
       }
       setCredits(p => p - cost);
@@ -285,7 +300,7 @@ export default function DashboardPage() {
       });
       showToast("Success", "Payment submitted for approval!", "info");
       setPaymentForm({ package: "", name: "", tid: "" });
-      loadCreditsHistory(); // Reload table
+      loadCreditsHistory();
     } catch(e) {
       showToast("Error", "Submission failed", "error");
     }
@@ -317,7 +332,6 @@ export default function DashboardPage() {
           </button>
           
           <div className="flex items-center gap-1.5 sm:gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
-            {/* Unique Custom Logo: Book/Shield + Analytics + Star/Premium feel */}
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className={t.primary}>
               <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="fill-current opacity-20"/>
               <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -364,7 +378,7 @@ export default function DashboardPage() {
             <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.3 }}
               className={`fixed top-0 left-0 h-full w-64 ${t.cardBg} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
             >
-              <div className="p-5 border-b border-white/10 flex justify-between items-center">
+              <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${t.btnPrimary}`}>
                     {currentUser.name.charAt(0)}
@@ -377,20 +391,20 @@ export default function DashboardPage() {
                 <button onClick={() => setSidebarOpen(false)}><X size={20} className={t.textMuted} /></button>
               </div>
               <div className="p-3 flex-1 space-y-1">
-                <button onClick={() => { setActiveTab('home'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'home' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
+                <button onClick={() => { setActiveTab('home'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'home' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <Search size={18} /> Search Portal
                 </button>
-                <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
+                <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <CreditCard size={18} /> Credits & Wallet
                 </button>
-                <button onClick={() => { setActiveTab('history'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'history' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
+                <button onClick={() => { setActiveTab('history'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'history' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <History size={18} /> Unlock History
                 </button>
-                <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : `hover:bg-slate-500/10`}`}>
+                <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <Share2 size={18} /> Referral Program
                 </button>
               </div>
-              <div className="p-4 border-t border-white/10 flex justify-between items-center">
+              <div className="p-4 border-t border-slate-500/10 flex justify-between items-center">
                 <span className="text-xs font-medium">Theme</span>
                 <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-2 rounded-lg border ${t.border}`}>
                   {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
@@ -406,7 +420,6 @@ export default function DashboardPage() {
         {/* TAB: HOME (SEARCH PORTAL) */}
         {activeTab === "home" && (
           <>
-            {/* Beautiful Welcome Card */}
             <div className={`relative overflow-hidden rounded-[1.5rem] p-5 sm:p-6 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
               <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none transform translate-x-4 -translate-y-4">
                 <GraduationCap size={140} />
@@ -436,7 +449,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Limit Warning */}
                 {(freeAttempts.name <= 0 || freeAttempts.result <= 0) && !useCredits && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
                     className="mt-4 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2"
@@ -448,7 +460,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* MAIN SEARCH CONTROLS */}
             <div className={`${t.cardBg} border ${t.border} p-4 sm:p-5 rounded-[1.25rem] shadow-sm mb-6 transition-all`}>
               <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-3 mb-1">
@@ -507,14 +518,12 @@ export default function DashboardPage() {
               </form>
             </div>
 
-            {/* Total Results Count */}
             {searchResults && (
               <div className={`text-xs font-bold mb-3 px-1 ${t.textMuted}`}>
                 Showing {searchResults.length} of {totalRecords} records found
               </div>
             )}
 
-            {/* RESULTS LIST */}
             <div className="space-y-3">
               <AnimatePresence>
                 {searchResults?.map((student, idx) => (
@@ -532,7 +541,6 @@ export default function DashboardPage() {
                       </button>
                     </div>
 
-                    {/* EXPANDED ACADEMIC LEDGER */}
                     <AnimatePresence>
                       {expandedReg === student.reg && studentDetails && (
                         <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className={`border-t ${t.border} overflow-hidden ${theme === 'light' ? 'bg-slate-50/50' : 'bg-[#00122a]/30'}`}>
@@ -589,7 +597,7 @@ export default function DashboardPage() {
                 ))}
               </AnimatePresence>
 
-              {searchResults && searchResults.length > 0 && searchResults.length < totalRecords && (
+              {searchResults && searchResults.length > 0 && totalRecords > searchResults.length && (
                 <button onClick={(e) => handleSearch(e, page + 1)} className={`w-full py-2.5 rounded-xl border ${t.border} ${t.cardBg} hover:bg-slate-500/5 text-sm font-bold transition-colors`}>
                   Load Next 10 Records
                 </button>
@@ -601,14 +609,12 @@ export default function DashboardPage() {
         {/* TAB: CREDITS (DEDICATED MOBILE OPTIMIZED PAGE) */}
         {activeTab === "credits" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl mx-auto">
-            {/* Wallet Overview */}
             <div className={`p-6 rounded-[1.5rem] text-center border ${theme === 'light' ? 'bg-gradient-to-b from-white to-slate-50 border-slate-200 shadow-sm' : 'bg-gradient-to-b from-[#001c4d] to-[#00122a] border-[#00348c]'}`}>
                <Wallet size={36} className={`mx-auto mb-3 ${t.primary}`}/>
                <h3 className={`text-sm font-bold uppercase tracking-widest ${t.textMuted} mb-1`}>Available Balance</h3>
                <div className="text-4xl sm:text-5xl font-black">{credits.toLocaleString()} <span className="text-xl font-medium opacity-50">CRD</span></div>
             </div>
 
-            {/* Top-up Plans */}
             <div>
               <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><TrendingUp size={18}/> Top-up Plans</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -618,7 +624,7 @@ export default function DashboardPage() {
                   { id: 'pkg3', price: 'Rs 5000', credits: 'Lifetime', label: 'Max (10/day)' },
                 ].map(pkg => (
                   <div key={pkg.id} onClick={() => setPaymentForm({ ...paymentForm, package: pkg.id })}
-                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all relative overflow-hidden ${paymentForm.package === pkg.id ? `border-amber-500 bg-amber-500/10` : `${t.border} ${t.cardBg}`}`}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all relative overflow-hidden ${paymentForm.package === pkg.id ? "border-amber-500 bg-amber-500/10" : t.border + " " + t.cardBg}`}
                   >
                     {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg">Popular</div>}
                     <div className="text-xs font-bold opacity-70 mb-1">{pkg.label}</div>
@@ -629,7 +635,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Payment Form (Shows only if a package is selected) */}
             <AnimatePresence>
               {paymentForm.package && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className={`p-5 rounded-[1.25rem] border ${t.border} ${t.cardBg} space-y-4`}>
@@ -653,7 +658,6 @@ export default function DashboardPage() {
               )}
             </AnimatePresence>
 
-            {/* Credits Usage & Deposit History */}
             <div className={`rounded-[1.25rem] border ${t.border} ${t.cardBg} overflow-hidden`}>
                <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
                  <h3 className="font-bold text-sm flex items-center gap-2"><History size={16}/> Transactions & Usage</h3>
@@ -661,11 +665,67 @@ export default function DashboardPage() {
                </div>
                
                <div className="p-0 overflow-x-auto">
-                 {/* Mix of deposits and usage for display */}
                  <table className="w-full text-left text-xs whitespace-nowrap">
                    <thead className={`bg-slate-500/5 text-opacity-80`}>
                      <tr>
                        <th className="px-4 py-2 font-bold">Date</th>
                        <th className="px-4 py-2 font-bold">Type</th>
                        <th className="px-4 py-2 font-bold">Details</th>
-                       <th className="px-4 py-2 text-right font-bold">Status/
+                       <th className="px-4 py-2 text-right font-bold">Status/Cost</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-500/10">
+                     {historyLogs.deposits.length === 0 && historyLogs.usage.length === 0 && !creditsTabLoading && (
+                       <tr><td colSpan={4} className="px-4 py-8 text-center opacity-50">No recent activity found.</td></tr>
+                     )}
+                     {historyLogs.deposits.map((dep, i) => (
+                       <tr key={`dep-${i}`} className="hover:bg-slate-500/5">
+                         <td className="px-4 py-3 font-mono opacity-70">{new Date(dep.created_at).toLocaleDateString()}</td>
+                         <td className="px-4 py-3 font-semibold text-emerald-500">Deposit</td>
+                         <td className="px-4 py-3 opacity-80">{dep.package_id} via {dep.account_name}</td>
+                         <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                           {dep.status.toUpperCase()}
+                         </td>
+                       </tr>
+                     ))}
+                     {historyLogs.usage.filter(u => u.search_type === 'View Result').map((usg, i) => (
+                       <tr key={`usg-${i}`} className="hover:bg-slate-500/5">
+                         <td className="px-4 py-3 font-mono opacity-70">{new Date(usg.created_at).toLocaleDateString()}</td>
+                         <td className="px-4 py-3 font-semibold text-red-400">Usage</td>
+                         <td className="px-4 py-3 opacity-80">Unlocked Reg: {usg.viewed_target_reg}</td>
+                         <td className="px-4 py-3 text-right font-bold opacity-70">-</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: HISTORY */}
+        {activeTab === "history" && (
+          <div className={`${t.cardBg} border ${t.border} p-6 rounded-[1.5rem]`}>
+            <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><History size={20}/> Unlocked Records</h3>
+            <p className="text-sm opacity-70">Saved unlocks will appear here. Re-viewing them does not cost credits unless you are fetching a newly updated semester.</p>
+          </div>
+        )}
+
+        {/* TAB: REFERRAL */}
+        {activeTab === "referral" && (
+          <div className={`${t.cardBg} border ${t.border} p-8 rounded-[1.5rem] text-center`}>
+            <div className={`w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-gradient-to-br from-[#0056b3] to-[#00348c] shadow-lg text-white`}>
+              <Share2 size={28} />
+            </div>
+            <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
+            <p className="text-sm opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up and buy credits, you get 20% of their purchase value added instantly to your wallet!</p>
+            <div className={`max-w-sm mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono text-xs sm:text-sm flex justify-between items-center pl-4`}>
+              <span className="truncate opacity-80">iubresults.com/ref/{currentUser.reg}</span>
+              <button onClick={() => showToast("Copied!", "Referral link copied to clipboard", "info")} className={`${t.btnPrimary} px-4 py-2 rounded-lg font-bold shadow-md`}>Copy</button>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
