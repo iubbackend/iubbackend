@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
+import Select from 'react-select'; // Added for searchable dropdowns
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -24,6 +25,7 @@ type Theme = "light" | "dark";
 interface FilterItem {
   id: number;
   label: string;
+  value: string; // Required for react-select
   session_id?: number;
   department_id?: number;
 }
@@ -59,7 +61,7 @@ export default function DashboardPage() {
   const [viewedRegsThisSession, setViewedRegsThisSession] = useState<string[]>([]);
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits" | "admin">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -68,9 +70,11 @@ export default function DashboardPage() {
   const [page, setPage] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
   
-  const [department, setDepartment] = useState("All");
-  const [session, setSession] = useState("All");
-  const [section, setSection] = useState("All");
+  // React-Select States
+  const [selectedDept, setSelectedDept] = useState<FilterItem | null>(null);
+  const [selectedSession, setSelectedSession] = useState<FilterItem | null>(null);
+  const [selectedSection, setSelectedSection] = useState<FilterItem | null>(null);
+
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     departments: [], sessions: [], sections: []
   });
@@ -82,6 +86,9 @@ export default function DashboardPage() {
   const [paymentForm, setPaymentForm] = useState({ package: "", amount: "", name: "", tid: "" });
   const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
+
+  // Admin States
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -108,7 +115,6 @@ export default function DashboardPage() {
         setCurrentUser({ reg: actualReg, name: actualName });
 
         if (actualReg !== "UNKNOWN") {
-          // Using maybeSingle prevents crashes if the wallet doesn't exist for new users yet
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).maybeSingle();
           if (userCreditsRes) {
             setCredits(userCreditsRes.credits || 0);
@@ -119,6 +125,7 @@ export default function DashboardPage() {
           }
         }
 
+        // Fetch Filters
         const [deptsRes, sessionsRes, sectionsRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
@@ -126,10 +133,15 @@ export default function DashboardPage() {
         ]);
 
         setFilterOptions({
-          departments: (deptsRes.data || []).map(d => ({ id: d.id, label: `${d.depart_code} - ${d.depart_name}` })),
-          sessions: (sessionsRes.data || []).map(s => ({ id: s.id, label: s.session_code })),
-          sections: (sectionsRes.data || []).map(s => ({ id: s.id, label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
+          departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
+          sessions: (sessionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.session_code })),
+          sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
         });
+
+        // Load Admin Pending Approvals if Admin
+        if (actualReg === ADMIN_REG) {
+          loadPendingApprovals();
+        }
 
       } catch (error) {
         console.error("Critical error loading data:", error);
@@ -156,6 +168,45 @@ export default function DashboardPage() {
       console.error("Failed to load history", err);
     } finally {
       setCreditsTabLoading(false);
+    }
+  };
+
+  const loadPendingApprovals = async () => {
+    try {
+      const { data } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+      setPendingApprovals(data || []);
+    } catch (e) {
+      console.error("Failed to load approvals", e);
+    }
+  };
+
+  const handleAdminApprove = async (paymentId: string, reg: string, amount: number) => {
+    try {
+      // 1. Mark as approved
+      await supabase.from('payments_record').update({ status: 'approved' }).eq('id', paymentId);
+      
+      // 2. Determine Credits (Example: 20 credits per Rs 1)
+      const creditsToAdd = amount * 20;
+
+      // 3. Add to user
+      const { data: userWallet } = await supabase.from('user_credits').select('credits').eq('user_reg', reg).single();
+      const currentCredits = userWallet?.credits || 0;
+      await supabase.from('user_credits').update({ credits: currentCredits + creditsToAdd }).eq('user_reg', reg);
+
+      // 4. Handle Referral Bonus (20%)
+      const { data: userRef } = await supabase.from('user_credits').select('referred_by').eq('user_reg', reg).single();
+      if (userRef?.referred_by) {
+        const bonusCredits = creditsToAdd * 0.20;
+        const { data: referrerWallet } = await supabase.from('user_credits').select('credits').eq('user_reg', userRef.referred_by).single();
+        if (referrerWallet) {
+           await supabase.from('user_credits').update({ credits: (referrerWallet.credits || 0) + bonusCredits }).eq('user_reg', userRef.referred_by);
+        }
+      }
+
+      showToast("Approved", `Approved Rs ${amount} for ${reg}.`, "info");
+      loadPendingApprovals();
+    } catch (e) {
+      showToast("Error", "Failed to approve payment", "error");
     }
   };
 
@@ -187,6 +238,42 @@ export default function DashboardPage() {
       : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-[#00122a] shadow-amber-500/20",
     tableHeader: theme === "light" ? "bg-[#0056b3]/5 text-[#0056b3]" : "bg-[#00122a] text-amber-400/90",
     rowHover: theme === "light" ? "hover:bg-slate-50/50" : "hover:bg-[#00205b]/40"
+  };
+
+  // React-Select Custom Styles
+  const selectStyles = {
+    control: (base: any, state: any) => ({
+      ...base,
+      background: 'transparent',
+      borderColor: 'transparent',
+      boxShadow: 'none',
+      cursor: 'pointer',
+      paddingLeft: '1.5rem',
+      minHeight: '2.5rem',
+      fontSize: '0.75rem',
+      color: theme === 'light' ? '#1e293b' : '#f1f5f9',
+    }),
+    singleValue: (base: any) => ({
+      ...base,
+      color: theme === 'light' ? '#1e293b' : '#f1f5f9',
+    }),
+    input: (base: any) => ({
+      ...base,
+      color: theme === 'light' ? '#1e293b' : '#f1f5f9',
+    }),
+    menu: (base: any) => ({
+      ...base,
+      backgroundColor: theme === 'light' ? '#ffffff' : '#001c4d',
+      border: `1px solid ${theme === 'light' ? '#e2e8f0' : '#00348c'}`,
+      zIndex: 50
+    }),
+    option: (base: any, state: any) => ({
+      ...base,
+      backgroundColor: state.isFocused ? (theme === 'light' ? '#f1f5f9' : '#00205b') : 'transparent',
+      color: theme === 'light' ? '#1e293b' : '#f1f5f9',
+      cursor: 'pointer',
+      fontSize: '0.75rem'
+    })
   };
 
   const logSearch = async (query: string, type: string, targetReg?: string) => {
@@ -223,7 +310,6 @@ export default function DashboardPage() {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
     
-    // Deduct attempt if searching by Name (which searches multiple people)
     if (searchMode === "Name" && newPage === 0 && !isAdmin && !useCredits) {
       const allowed = await deductFreeAttempt();
       if (!allowed) return;
@@ -242,14 +328,14 @@ export default function DashboardPage() {
       } else {
         query = query.ilike("name", `%${searchQuery.trim()}%`);
         
-        if (session !== "All") query = query.eq("session_id", parseInt(session));
-        if (section !== "All") query = query.eq("section_id", parseInt(section));
+        if (selectedSession) query = query.eq("session_id", selectedSession.id);
+        if (selectedSection) query = query.eq("section_id", selectedSection.id);
         
-        if (department !== "All") {
+        if (selectedDept) {
           const { data: matchingResults } = await supabase
             .from("results")
             .select("student_id")
-            .eq("department_id", parseInt(department));
+            .eq("department_id", selectedDept.id);
             
           const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
           if (studentIds.length === 0) {
@@ -302,7 +388,6 @@ export default function DashboardPage() {
         }
         setCredits(p => p - cost);
       } else {
-        // If searching a specific result and not viewed today, deduct free attempt
         if (!viewedRegsThisSession.includes(reg)) {
           const allowed = await deductFreeAttempt();
           if (!allowed) return;
@@ -328,7 +413,6 @@ export default function DashboardPage() {
       }
 
       const grouped = records.reduce((acc: any, rec: any) => {
-        // Fix: Checks both common column names for semester grouping
         const sem = rec.semester || rec.semester_num || "General";
         if (!acc[sem]) acc[sem] = [];
         acc[sem].push({
@@ -344,7 +428,6 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      // Sort Semesters from latest (highest number) to earliest
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
         const numA = parseInt(a.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.replace(/\D/g, '')) || 0;
@@ -432,13 +515,10 @@ export default function DashboardPage() {
         <div className="flex items-center gap-1.5 sm:gap-3">
           
           {isAdmin && (
-            <button 
-              onClick={() => setActiveTab("admin")}
-              className={`flex items-center gap-1 px-2 py-1.5 sm:px-3 rounded-lg bg-red-500 text-white transition-all text-xs font-bold shadow-md`}
-            >
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-yellow-500 text-black transition-all text-xs font-black shadow-md`}>
               <ShieldAlert size={14} />
-              <span className="hidden sm:inline">Admin</span>
-            </button>
+              <span>ADMIN MODE</span>
+            </div>
           )}
 
           {!isAdmin && (
@@ -490,7 +570,7 @@ export default function DashboardPage() {
             >
               <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-red-500 text-white' : t.btnPrimary}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-yellow-500 text-black' : t.btnPrimary}`}>
                     {currentUser.name.charAt(0)}
                   </div>
                   <div className="leading-tight">
@@ -505,12 +585,6 @@ export default function DashboardPage() {
                   <Search size={18} /> Search Portal
                 </button>
                 
-                {isAdmin && (
-                  <button onClick={() => { setActiveTab('admin'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-red-500 text-white' : "hover:bg-slate-500/10"}`}>
-                    <ShieldAlert size={18} /> Admin Dashboard
-                  </button>
-                )}
-
                 {!isAdmin && (
                   <>
                     <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
@@ -532,98 +606,91 @@ export default function DashboardPage() {
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-6 py-6 z-10">
         
-        {/* TAB: ADMIN (ONLY SHOWN TO ADMIN) */}
-        {isAdmin && activeTab === "admin" && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-            <h2 className="text-2xl font-black mb-4 flex items-center gap-2">
-              <ShieldAlert className="text-red-500" /> Admin Command Center
-            </h2>
-            
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {[
-                { title: "Sales", value: "142", icon: <CreditCard size={16} /> },
-                { title: "Pending Approvals", value: "14", icon: <CheckCircle2 size={16} />, alert: true },
-                { title: "Total Users", value: "8,245", icon: <UsersRound size={16} /> },
-                { title: "Premium Users", value: "412", icon: <Crown size={16} className="text-amber-500" /> },
-                { title: "Profit Earned", value: "Rs 85,400", icon: <DollarSign size={16} className="text-emerald-500" /> },
-                { title: "Results Searched", value: "45,892", icon: <FileSearch size={16} /> },
-              ].map((stat, i) => (
-                <div key={i} className={`p-4 rounded-2xl border ${t.border} ${t.cardBg} relative overflow-hidden`}>
-                  {stat.alert && <div className="absolute top-0 right-0 w-2 h-2 m-4 rounded-full bg-red-500 animate-pulse"></div>}
-                  <div className={`text-xs font-bold opacity-70 mb-2 flex items-center gap-1.5`}>
-                    {stat.icon} {stat.title}
-                  </div>
-                  <div className="text-xl sm:text-2xl font-black">{stat.value}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className={`mt-8 p-5 rounded-[1.5rem] border ${t.border} ${t.cardBg}`}>
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Share2 size={18}/> Referral Leaderboard</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className={`bg-slate-500/5 text-opacity-80`}>
-                    <tr>
-                      <th className="px-4 py-2 font-bold rounded-tl-lg">Rank</th>
-                      <th className="px-4 py-2 font-bold">Registration</th>
-                      <th className="px-4 py-2 font-bold text-right rounded-tr-lg">Credits Earned</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-500/10">
-                    <tr className="hover:bg-slate-500/5">
-                      <td className="px-4 py-3 font-black text-amber-500">#1</td>
-                      <td className="px-4 py-3 font-semibold">F20BSCS1M021</td>
-                      <td className="px-4 py-3 text-right font-bold text-emerald-500">45,000</td>
-                    </tr>
-                    <tr className="hover:bg-slate-500/5">
-                      <td className="px-4 py-3 font-bold opacity-80">#2</td>
-                      <td className="px-4 py-3 font-semibold">F21BSSE1M110</td>
-                      <td className="px-4 py-3 text-right font-bold text-emerald-500">12,500</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* TAB: HOME (SEARCH PORTAL) */}
+        {/* TAB: HOME (SEARCH PORTAL + ADMIN) */}
         {activeTab === "home" && (
           <>
+            {/* ADMIN INJECTED COMMAND CENTER */}
+            {isAdmin && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 space-y-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CreditCard size={12}/> Sales</div>
+                    <div className="text-xl font-black">142</div>
+                  </div>
+                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg} relative`}>
+                    {pendingApprovals.length > 0 && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
+                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CheckCircle2 size={12}/> Pending Approvals</div>
+                    <div className="text-xl font-black">{pendingApprovals.length}</div>
+                  </div>
+                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><UsersRound size={12}/> Total Users</div>
+                    <div className="text-xl font-black">8,245</div>
+                  </div>
+                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><DollarSign size={12}/> Profit Earned</div>
+                    <div className="text-xl font-black text-emerald-500">Rs 85,400</div>
+                  </div>
+                </div>
+
+                <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                  <h3 className="font-bold text-sm mb-3">Pending Payment Approvals</h3>
+                  <div className="space-y-2">
+                    {pendingApprovals.length === 0 && <p className="text-xs opacity-50">No pending approvals.</p>}
+                    {pendingApprovals.map((p) => (
+                      <div key={p.id} className="flex justify-between items-center p-3 border border-slate-500/20 rounded-lg hover:bg-slate-500/5">
+                        <div>
+                          <p className="font-bold text-sm">{p.user_reg}</p>
+                          <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
+                        </div>
+                        <button 
+                          onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-md font-bold text-xs transition-colors"
+                        >
+                          Approve
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             <div className={`relative overflow-hidden rounded-[1.5rem] p-5 sm:p-6 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
               <div className="absolute top-0 left-0 p-4 opacity-10 pointer-events-none transform -translate-x-4 -translate-y-4">
                 <GraduationCap size={140} />
               </div>
               
               <div className="relative z-10 flex flex-col h-full justify-between">
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex justify-between items-start mb-4">
                   <div>
                     <h2 className="text-xl sm:text-3xl font-black mb-1">Welcome back, {formatFirstName(currentUser.name)}!</h2>
-                    <p className="text-xs sm:text-sm opacity-80 max-w-sm">Use the search portal below to find and review academic records.</p>
                   </div>
                   
-                  {/* Live Database & Nano Free Attempts */}
+                  {/* Live Database */}
                   <div className="flex flex-col items-end gap-2">
                     <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
                       <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
                       Live Database
                     </div>
-                    {!isAdmin && (
-                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] font-bold`}>
-                        <Activity size={10} className="opacity-70"/> Free Attempts: <span className={theme==='light' ? 'text-white font-black' : 'text-amber-400 font-black'}>{freeAttempts}/4</span>
-                      </div>
-                    )}
-                    {isAdmin && (
-                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-red-500/20 border-red-500/30 text-red-200 text-[10px] font-bold`}>
-                        <ShieldAlert size={10}/> Admin Mode Active
-                      </div>
-                    )}
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  {!isAdmin && (
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
+                      <Activity size={12} className="opacity-70"/> Free Attempts: <span className={theme==='light' ? 'text-white font-black' : 'text-amber-400 font-black'}>{freeAttempts}/4</span>
+                    </div>
+                  )}
+                  {!isAdmin && (
+                    <button onClick={() => setActiveTab('referral')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20 hover:bg-white/20' : 'bg-[#00205b]/40 border-blue-400/20 hover:bg-[#00205b]/60'} text-[10px] sm:text-xs font-bold transition-colors`}>
+                      <Share2 size={12} className="text-emerald-400"/> Earn by Sharing
+                    </button>
+                  )}
+                </div>
+                
                 {(freeAttempts <= 0) && !useCredits && !isAdmin && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                    className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
+                    className="mt-2 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
                   >
                     <Lock size={14}/> <span>Free attempts ended. Turn on <b>Use Credits</b> or check tomorrow.</span>
                     <button onClick={() => setActiveTab('credits')} className="ml-2 underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
@@ -651,32 +718,41 @@ export default function DashboardPage() {
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
                       className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 overflow-hidden"
                     >
-                      <div className="relative">
-                        <Calendar className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
-                        <select value={session} onChange={(e) => { setSession(e.target.value); setSection("All"); }} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
-                          <option value="All">All Sessions</option>
-                          {filterOptions.sessions.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                        </select>
+                      <div className="relative z-30">
+                        <Calendar className={`absolute left-2.5 top-2.5 ${t.textMuted} z-10`} size={14} />
+                        <Select
+                          options={filterOptions.sessions}
+                          value={selectedSession}
+                          onChange={(val) => { setSelectedSession(val); setSelectedSection(null); }}
+                          styles={selectStyles}
+                          placeholder="All Sessions"
+                          isClearable
+                        />
                       </div>
-                      <div className="relative">
-                        <Building className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
-                        <select value={department} onChange={(e) => { setDepartment(e.target.value); setSection("All"); }} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
-                          <option value="All">All Departments</option>
-                          {filterOptions.departments.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-                        </select>
+                      <div className="relative z-20">
+                        <Building className={`absolute left-2.5 top-2.5 ${t.textMuted} z-10`} size={14} />
+                        <Select
+                          options={filterOptions.departments}
+                          value={selectedDept}
+                          onChange={(val) => { setSelectedDept(val); setSelectedSection(null); }}
+                          styles={selectStyles}
+                          placeholder="All Departments"
+                          isClearable
+                        />
                       </div>
-                      <div className="relative">
-                        <Users className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
-                        <select value={section} onChange={(e) => setSection(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
-                          <option value="All">All Sections</option>
-                          {filterOptions.sections
-                            .filter(s => 
-                              (session === "All" || s.session_id === parseInt(session)) && 
-                              (department === "All" || s.department_id === parseInt(department))
-                            )
-                            .map((s) => <option key={s.id} value={s.id}>{s.label}</option>)
-                          }
-                        </select>
+                      <div className="relative z-10">
+                        <Users className={`absolute left-2.5 top-2.5 ${t.textMuted} z-10`} size={14} />
+                        <Select
+                          options={filterOptions.sections.filter(s => 
+                            (!selectedSession || s.session_id === parseInt(selectedSession.value)) && 
+                            (!selectedDept || s.department_id === parseInt(selectedDept.value))
+                          )}
+                          value={selectedSection}
+                          onChange={(val) => setSelectedSection(val)}
+                          styles={selectStyles}
+                          placeholder="All Sections"
+                          isClearable
+                        />
                       </div>
                     </motion.div>
                   )}
@@ -708,11 +784,11 @@ export default function DashboardPage() {
                   <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={idx} className={`${t.cardBg} border ${t.border} rounded-2xl shadow-sm overflow-hidden`}>
                     <div className="p-3 sm:p-4 flex justify-between items-center gap-2 cursor-pointer hover:bg-slate-500/5 transition-colors" onClick={() => handleExpandResult(student.reg, student.id)}>
                       <div>
-                        <h3 className="text-sm sm:text-base font-bold">{student.name}</h3>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] sm:text-xs px-1.5 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-[#00122a] border-[#00348c]'}`}>{student.reg}</span>
-                          <span className={`text-[10px] ${t.textMuted}`}>{student.session} • {student.section}</span>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <h3 className="text-sm sm:text-base font-bold">{student.name}</h3>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-[#00122a] border-[#00348c]'}`}>{student.reg}</span>
                         </div>
+                        <div className={`text-[10px] ${t.textMuted}`}>{student.session} • {student.section}</div>
                       </div>
                       <button className={`p-1.5 rounded-full ${t.textMuted} hover:${t.primary} transition-colors`}>
                         {expandedReg === student.reg ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
