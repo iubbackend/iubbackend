@@ -9,12 +9,12 @@ import {
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from '@supabase/ssr'; // Upgraded to match login/page.tsx
 
-// Initialize Supabase Client
+// Initialize Supabase Client via SSR to read auth cookies properly
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
@@ -22,9 +22,10 @@ type Theme = "light" | "dark";
 interface FilterItem {
   id: number;
   label: string;
+  session_id?: number;
+  department_id?: number;
 }
 
-// Extracted Interfaces to prevent Vercel SWC Compiler Panics
 interface FilterOptions {
   departments: FilterItem[];
   sessions: FilterItem[];
@@ -45,8 +46,8 @@ interface HistoryLogs {
 export default function DashboardPage() {
   const router = useRouter();
   
-  // Theme State
-  const [theme, setTheme] = useState<Theme>("light");
+  // Theme State - Default to Dark
+  const [theme, setTheme] = useState<Theme>("dark");
   
   // App & User States
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading..." });
@@ -87,61 +88,62 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        // 1. GET AUTH SESSION: Check who securely logged in via Supabase Auth
+        // 1. GET AUTH SESSION via Cookies
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (!session?.user?.email) {
-          // If no one is logged in, kick them back to the login page
           router.push('/login');
           return;
         }
 
-        // 2. GET REG NUMBER: Match the logged-in email to your 'users' table
-        const { data: userRecord, error: userError } = await supabase
-          .from("users")
-          .select("reg")
-          .eq("email", session.user.email)
-          .single();
+        // 2. GET REG NUMBER Safely
+        let actualReg = "UNKNOWN";
+        const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).single();
+        if (userRecord?.reg) {
+          actualReg = userRecord.reg;
+        }
 
-        if (userError || !userRecord) throw new Error("Could not find registration number for this email.");
+        // 3. GET STUDENT NAME Safely (Does not crash if missing)
+        let actualName = "Student";
+        if (actualReg !== "UNKNOWN") {
+          const { data: studentNameRes } = await supabase.from("students").select("name").eq("reg", actualReg).single();
+          if (studentNameRes?.name) actualName = studentNameRes.name;
+        }
 
-        const actualReg = userRecord.reg; // This is the real Roll Number
+        setCurrentUser({ reg: actualReg, name: actualName });
 
-        // 3. FETCH EVERYTHING ELSE using the real actualReg
-        const [deptsRes, sessionsRes, sectionsRes, userCreditsRes, studentNameRes] = await Promise.all([
+        // 4. FETCH CREDITS Safely
+        if (actualReg !== "UNKNOWN") {
+          const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).single();
+          if (userCreditsRes) {
+            setCredits(userCreditsRes.credits || 0);
+            setFreeAttempts({
+              name: Math.max(0, 3 - (userCreditsRes.free_name_searches_today || 0)),
+              result: Math.max(0, 3 - (userCreditsRes.free_reg_searches_today || 0))
+            });
+          }
+        }
+
+        // 5. FETCH FILTERS Safely (Include session_id and department_id for cascading)
+        const [deptsRes, sessionsRes, sectionsRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
-          supabase.from("sections").select("id, section_name"),
-          supabase.from("user_credits").select("*").eq("user_reg", actualReg).single(),
-          supabase.from("students").select("name").eq("reg", actualReg).single()
+          supabase.from("sections").select("id, section_name, session_id, department_id") // Fetching keys for cascading dropdowns
         ]);
-
-        // 4. Update the Dashboard UI with the Real User Data
-        setCurrentUser({ 
-          reg: actualReg, 
-          name: studentNameRes.data?.name || "Student" // Fallback if name is missing in students table
-        });
 
         setFilterOptions({
           departments: (deptsRes.data || []).map(d => ({ id: d.id, label: `${d.depart_code} - ${d.depart_name}` })),
           sessions: (sessionsRes.data || []).map(s => ({ id: s.id, label: s.session_code })),
-          sections: (sectionsRes.data || []).map(s => ({ id: s.id, label: s.section_name }))
+          sections: (sectionsRes.data || []).map(s => ({ id: s.id, label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
         });
 
-        if (userCreditsRes.data) {
-          setCredits(userCreditsRes.data.credits);
-          setFreeAttempts({
-            name: Math.max(0, 3 - (userCreditsRes.data.free_name_searches_today || 0)),
-            result: Math.max(0, 3 - (userCreditsRes.data.free_reg_searches_today || 0))
-          });
-        }
       } catch (error) {
-        console.error("Error loading initial data:", error);
+        console.error("Critical error loading data:", error);
       }
     }
     
     fetchInitialData();
-  }, [router]); // Empty dependency array removed currentUser.reg to prevent infinite loops
+  }, [router]);
 
   useEffect(() => {
     if (activeTab === "credits") {
@@ -152,6 +154,7 @@ export default function DashboardPage() {
   const loadCreditsHistory = async () => {
     setCreditsTabLoading(true);
     try {
+      if (!currentUser.reg) return;
       const [depRes, usageRes] = await Promise.all([
         supabase.from("payments_record").select("*").eq("user_reg", currentUser.reg).order("created_at", { ascending: false }),
         supabase.from("user_search_log").select("*").eq("searcher_reg", currentUser.reg).order("created_at", { ascending: false }).limit(20)
@@ -187,14 +190,13 @@ export default function DashboardPage() {
 
   const logSearch = async (query: string, type: string, targetReg?: string) => {
     try {
-      const { error } = await supabase.from("user_search_log").insert({
+      await supabase.from("user_search_log").insert({
         searcher_reg: currentUser.reg,
         searcher_name: currentUser.name,
         search_query: query,
         search_type: type,
         viewed_target_reg: targetReg || null
       });
-      if (error) console.error("Search Log Insert Failed:", error);
     } catch (err) {
       console.error("Search Log Exception:", err);
     }
@@ -221,8 +223,26 @@ export default function DashboardPage() {
         query = query.ilike("reg", `%${searchQuery.trim()}%`);
       } else {
         query = query.ilike("name", `%${searchQuery.trim()}%`);
+        
         if (session !== "All") query = query.eq("session_id", parseInt(session));
         if (section !== "All") query = query.eq("section_id", parseInt(section));
+        
+        // Department Filter Logic (Subquery via results table)
+        if (department !== "All") {
+          const { data: matchingResults } = await supabase
+            .from("results")
+            .select("student_id")
+            .eq("department_id", parseInt(department));
+            
+          const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
+          if (studentIds.length === 0) {
+            setSearchResults([]);
+            setTotalRecords(0);
+            setIsSearching(false);
+            return;
+          }
+          query = query.in("id", studentIds);
+        }
       }
 
       query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
@@ -231,10 +251,7 @@ export default function DashboardPage() {
       if (error) throw error;
 
       if (searchMode === "Name" && !useCredits && newPage === 0) {
-        // 1. Decrement attempts locally
         setFreeAttempts(p => ({ ...p, name: p.name - 1 }));
-        
-        // 2. Persist the incremented usage count to Supabase
         await supabase
           .from("user_credits")
           .update({ free_name_searches_today: 3 - (freeAttempts.name - 1) })
@@ -279,20 +296,18 @@ export default function DashboardPage() {
         showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
         return;
       }
-      setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
     }
 
     setExpandedReg(reg);
-logSearch(searchQuery, "View Result", reg);
+    logSearch(searchQuery, "View Result", reg);
 
-// If the user used a free attempt, save the updated count to Supabase
-if (!useCredits) {
-  setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
-  await supabase
-    .from("user_credits")
-    .update({ free_reg_searches_today: 3 - (freeAttempts.result - 1) })
-    .eq("user_reg", currentUser.reg);
-}
+    if (!useCredits) {
+      setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
+      await supabase
+        .from("user_credits")
+        .update({ free_reg_searches_today: 3 - (freeAttempts.result - 1) })
+        .eq("user_reg", currentUser.reg);
+    }
 
     try {
       const columns = useCredits 
@@ -331,6 +346,8 @@ if (!useCredits) {
 
   const handlePaymentSubmit = async () => {
     if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Please fill all payment details", "error");
+    if (!currentUser.reg || currentUser.reg === "UNKNOWN") return showToast("Session Error", "Could not verify your registration number. Please login again.", "error");
+
     try {
       await supabase.from("payments_record").insert({
         user_reg: currentUser.reg,
@@ -384,7 +401,14 @@ if (!useCredits) {
         </div>
         
         <div className="flex items-center gap-2 sm:gap-4">
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          
+          {/* COMPACT ATTEMPTS BADGE */}
+          <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-slate-700' : 'bg-[#001c4d] text-blue-200'} text-xs font-bold shadow-sm`}>
+            <Activity size={14} className={t.primary} />
+            <span>Attempts: {freeAttempts.name} Name | {freeAttempts.result} Result</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 ml-1">
             <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70 hidden sm:block">
               Use Credits
             </span>
@@ -467,34 +491,14 @@ if (!useCredits) {
               
               <div className="relative z-10">
                 <h2 className="text-xl sm:text-2xl font-black mb-1">Welcome back, {currentUser.name}!</h2>
-                <p className="text-sm opacity-80 mb-5 max-w-sm">Here is your daily free search allowance. Toggle 'Use Credits' in the header to bypass limits.</p>
+                <p className="text-sm opacity-80 mb-2 max-w-sm">Use the search portal below to find and review academic records. Toggle 'Use Credits' in the header to bypass your daily free limits and unlock detailed marks.</p>
                 
-                <div className="flex flex-wrap gap-3 sm:gap-4">
-                  <div className={`flex-1 min-w-[140px] rounded-xl p-3 sm:p-4 backdrop-blur-md border ${theme === 'light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/50 border-blue-400/20'}`}>
-                    <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 opacity-80">
-                      <Search size={12}/> Name Search
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-black">
-                      {freeAttempts.name} <span className="text-xs sm:text-sm font-medium opacity-60">/ 3 today</span>
-                    </div>
-                  </div>
-                  
-                  <div className={`flex-1 min-w-[140px] rounded-xl p-3 sm:p-4 backdrop-blur-md border ${theme === 'light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/50 border-blue-400/20'}`}>
-                    <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 opacity-80">
-                      <Activity size={12}/> Result Views
-                    </div>
-                    <div className="text-2xl sm:text-3xl font-black">
-                      {freeAttempts.result} <span className="text-xs sm:text-sm font-medium opacity-60">/ 3 today</span>
-                    </div>
-                  </div>
-                </div>
-
                 {(freeAttempts.name <= 0 || freeAttempts.result <= 0) && !useCredits && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                    className="mt-4 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2"
+                    className="mt-4 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
                   >
                     <Lock size={14}/> <span>Free attempts ended. Turn on <b>Use Credits</b> or check tomorrow.</span>
-                    <button onClick={() => setActiveTab('credits')} className="ml-auto underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
+                    <button onClick={() => setActiveTab('credits')} className="ml-2 underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
                   </motion.div>
                 )}
               </div>
@@ -521,14 +525,14 @@ if (!useCredits) {
                     >
                       <div className="relative">
                         <Calendar className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
-                        <select value={session} onChange={(e) => setSession(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
+                        <select value={session} onChange={(e) => { setSession(e.target.value); setSection("All"); }} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
                           <option value="All">All Sessions</option>
                           {filterOptions.sessions.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                         </select>
                       </div>
                       <div className="relative">
                         <Building className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
-                        <select value={department} onChange={(e) => setDepartment(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
+                        <select value={department} onChange={(e) => { setDepartment(e.target.value); setSection("All"); }} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
                           <option value="All">All Departments</option>
                           {filterOptions.departments.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
                         </select>
@@ -537,7 +541,14 @@ if (!useCredits) {
                         <Users className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
                         <select value={section} onChange={(e) => setSection(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
                           <option value="All">All Sections</option>
-                          {filterOptions.sections.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                          {/* DYNAMIC CASCADING SECTIONS */}
+                          {filterOptions.sections
+                            .filter(s => 
+                              (session === "All" || s.session_id === parseInt(session)) && 
+                              (department === "All" || s.department_id === parseInt(department))
+                            )
+                            .map((s) => <option key={s.id} value={s.id}>{s.label}</option>)
+                          }
                         </select>
                       </div>
                     </motion.div>
@@ -646,7 +657,7 @@ if (!useCredits) {
           </>
         )}
 
-        {/* TAB: CREDITS (DEDICATED MOBILE OPTIMIZED PAGE) */}
+        {/* TAB: CREDITS */}
         {activeTab === "credits" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl mx-auto">
             <div className={`p-6 rounded-[1.5rem] text-center border ${theme === 'light' ? 'bg-gradient-to-b from-white to-slate-50 border-slate-200 shadow-sm' : 'bg-gradient-to-b from-[#001c4d] to-[#00122a] border-[#00348c]'}`}>
