@@ -9,9 +9,8 @@ import {
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createBrowserClient } from '@supabase/ssr'; // Upgraded to match login/page.tsx
+import { createBrowserClient } from '@supabase/ssr';
 
-// Initialize Supabase Client via SSR to read auth cookies properly
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
@@ -46,28 +45,22 @@ interface HistoryLogs {
 export default function DashboardPage() {
   const router = useRouter();
   
-  // Theme State - Default to Dark
   const [theme, setTheme] = useState<Theme>("dark");
-  
-  // App & User States
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading..." });
   const [credits, setCredits] = useState(0);
   const [useCredits, setUseCredits] = useState(false);
   const [freeAttempts, setFreeAttempts] = useState({ name: 3, result: 3 });
   
-  // UI States
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
 
-  // Search States
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("Roll Number");
   const [isSearching, setIsSearching] = useState(false);
   const [page, setPage] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
   
-  // Filter States
   const [department, setDepartment] = useState("All");
   const [session, setSession] = useState("All");
   const [section, setSection] = useState("All");
@@ -75,20 +68,17 @@ export default function DashboardPage() {
     departments: [], sessions: [], sections: []
   });
 
-  // Results & Expansion States
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [expandedReg, setExpandedReg] = useState<string | null>(null);
-  const [studentDetails, setStudentDetails] = useState<any | null>(null);
+  const [studentDetails, setStudentDetails] = useState<any[] | null>(null);
 
-  // Credits Page States
-  const [paymentForm, setPaymentForm] = useState({ package: "", name: "", tid: "" });
+  const [paymentForm, setPaymentForm] = useState({ package: "", amount: "", name: "", tid: "" });
   const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
   useEffect(() => {
     async function fetchInitialData() {
       try {
-        // 1. GET AUTH SESSION via Cookies
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (!session?.user?.email) {
@@ -96,14 +86,12 @@ export default function DashboardPage() {
           return;
         }
 
-        // 2. GET REG NUMBER Safely
         let actualReg = "UNKNOWN";
         const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).single();
         if (userRecord?.reg) {
           actualReg = userRecord.reg;
         }
 
-        // 3. GET STUDENT NAME Safely (Does not crash if missing)
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
           const { data: studentNameRes } = await supabase.from("students").select("name").eq("reg", actualReg).single();
@@ -112,7 +100,6 @@ export default function DashboardPage() {
 
         setCurrentUser({ reg: actualReg, name: actualName });
 
-        // 4. FETCH CREDITS Safely
         if (actualReg !== "UNKNOWN") {
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).single();
           if (userCreditsRes) {
@@ -124,11 +111,10 @@ export default function DashboardPage() {
           }
         }
 
-        // 5. FETCH FILTERS Safely (Include session_id and department_id for cascading)
         const [deptsRes, sessionsRes, sectionsRes] = await Promise.all([
           supabase.from("departments").select("id, depart_name, depart_code"),
           supabase.from("academic_sessions").select("id, session_code"),
-          supabase.from("sections").select("id, section_name, session_id, department_id") // Fetching keys for cascading dropdowns
+          supabase.from("sections").select("id, section_name, session_id, department_id")
         ]);
 
         setFilterOptions({
@@ -170,6 +156,15 @@ export default function DashboardPage() {
   const showToast = (title: string, desc: string, type: 'error'|'info' = 'error') => {
     setToastMsg({ title, desc, type });
     setTimeout(() => setToastMsg(null), 4000);
+  };
+
+  const formatFirstName = (fullName: string) => {
+    if (!fullName) return "";
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length > 1 && parts[0].toLowerCase() === "muhammad") {
+      return parts[1];
+    }
+    return parts[0];
   };
 
   const t = {
@@ -227,7 +222,6 @@ export default function DashboardPage() {
         if (session !== "All") query = query.eq("session_id", parseInt(session));
         if (section !== "All") query = query.eq("section_id", parseInt(section));
         
-        // Department Filter Logic (Subquery via results table)
         if (department !== "All") {
           const { data: matchingResults } = await supabase
             .from("results")
@@ -317,7 +311,12 @@ export default function DashboardPage() {
       const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId);
       if (error) throw error;
 
-      const grouped = (records || []).reduce((acc: any, rec: any) => {
+      if (!records || records.length === 0) {
+        setStudentDetails([]);
+        return;
+      }
+
+      const grouped = records.reduce((acc: any, rec: any) => {
         const sem = rec.semester_num || "General";
         if (!acc[sem]) acc[sem] = [];
         acc[sem].push({
@@ -341,22 +340,35 @@ export default function DashboardPage() {
       setStudentDetails(sortedSemesters);
     } catch (err) {
       console.error("Failed to compile marks:", err);
+      setStudentDetails([]);
     }
   };
 
+  const packages = [
+    { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Basic' },
+    { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Pro', pop: true },
+    { id: 'pkg3', price: 'Rs 5000', amount: 5000, credits: 'Lifetime', label: 'Max (10/day)' },
+    { id: 'custom', price: 'Custom', amount: 0, credits: 'Variable', label: 'Enter Amount' }
+  ];
+
   const handlePaymentSubmit = async () => {
     if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Please fill all payment details", "error");
+    if (paymentForm.package === 'custom' && (!paymentForm.amount || isNaN(Number(paymentForm.amount)))) return showToast("Invalid Amount", "Please enter a valid custom amount", "error");
     if (!currentUser.reg || currentUser.reg === "UNKNOWN") return showToast("Session Error", "Could not verify your registration number. Please login again.", "error");
+
+    const selectedPkg = packages.find(p => p.id === paymentForm.package);
+    const finalAmount = paymentForm.package === 'custom' ? Number(paymentForm.amount) : selectedPkg?.amount;
 
     try {
       await supabase.from("payments_record").insert({
         user_reg: currentUser.reg,
         package_id: paymentForm.package,
+        amount: finalAmount,
         account_name: paymentForm.name,
         tid_number: paymentForm.tid
       });
       showToast("Success", "Payment submitted for approval!", "info");
-      setPaymentForm({ package: "", name: "", tid: "" });
+      setPaymentForm({ package: "", amount: "", name: "", tid: "" });
       loadCreditsHistory();
     } catch(e) {
       showToast("Error", "Submission failed", "error");
@@ -381,55 +393,48 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      {/* HEADER */}
-      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-3 sm:px-4 py-3 flex justify-between items-center`}>
-        <div className="flex items-center gap-2 sm:gap-3">
+      {/* HEADER - Mobile Optimized completely */}
+      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-2 sm:px-4 py-3 flex justify-between items-center`}>
+        <div className="flex items-center gap-1.5 sm:gap-3">
           <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
             <Menu size={20} className={t.primary} />
           </button>
           
-          <div className="flex items-center gap-1.5 sm:gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className={t.primary}>
+          <div className="flex items-center gap-1 cursor-pointer" onClick={() => setActiveTab('home')}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className={t.primary}>
               <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="fill-current opacity-20"/>
               <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M7 14l3-3 2 2 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <h1 className="text-[13px] sm:text-lg font-black tracking-tight leading-none whitespace-nowrap">
+            <h1 className="text-xs sm:text-lg font-black tracking-tight leading-none whitespace-nowrap">
               IUB Result<span className={theme === 'light' ? 'text-[#0056b3]' : 'text-amber-500'}>Portal</span>
             </h1>
           </div>
         </div>
         
-        <div className="flex items-center gap-2 sm:gap-4">
-          
-          {/* COMPACT ATTEMPTS BADGE */}
-          <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-slate-700' : 'bg-[#001c4d] text-blue-200'} text-xs font-bold shadow-sm`}>
-            <Activity size={14} className={t.primary} />
-            <span>Attempts: {freeAttempts.name} Name | {freeAttempts.result} Result</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 ml-1">
-            <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70 hidden sm:block">
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
               Use Credits
             </span>
             <button 
               onClick={() => setUseCredits(!useCredits)}
-              className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
+              className={`w-8 h-4 sm:w-9 sm:h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
             >
-              <motion.div animate={{ x: useCredits ? 16 : 0 }} className="bg-white w-4 h-4 rounded-full shadow-sm"/>
+              <motion.div animate={{ x: useCredits ? (typeof window !== 'undefined' && window.innerWidth < 640 ? 16 : 16) : 0 }} className="bg-white w-3 h-3 sm:w-4 sm:h-4 rounded-full shadow-sm"/>
             </button>
           </div>
 
           <button 
             onClick={() => setActiveTab("credits")}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
+            className={`flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
           >
             <Wallet size={14} className={t.primary} />
             <span>{credits.toLocaleString()}</span>
           </button>
 
-          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'} hidden sm:block`}>
-            {theme === "light" ? <Sun size={16} /> : <Moon size={16} />}
+          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'}`}>
+            {theme === "light" ? <Sun size={14} className="sm:w-4 sm:h-4" /> : <Moon size={14} className="sm:w-4 sm:h-4" />}
           </button>
         </div>
       </header>
@@ -448,7 +453,7 @@ export default function DashboardPage() {
                     {currentUser.name.charAt(0)}
                   </div>
                   <div className="leading-tight">
-                    <div className="text-sm font-bold truncate max-w-[120px]">{currentUser.name}</div>
+                    <div className="text-sm font-bold truncate max-w-[120px]">{formatFirstName(currentUser.name)}</div>
                     <div className={`text-[10px] font-mono ${t.textMuted}`}>{currentUser.reg}</div>
                   </div>
                 </div>
@@ -468,12 +473,6 @@ export default function DashboardPage() {
                   <Share2 size={18} /> Referral Program
                 </button>
               </div>
-              <div className="p-4 border-t border-slate-500/10 flex justify-between items-center">
-                <span className="text-xs font-medium">Theme</span>
-                <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-2 rounded-lg border ${t.border}`}>
-                  {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
-                </button>
-              </div>
             </motion.div>
           </>
         )}
@@ -490,8 +489,26 @@ export default function DashboardPage() {
               </div>
               
               <div className="relative z-10">
-                <h2 className="text-xl sm:text-2xl font-black mb-1">Welcome back, {currentUser.name}!</h2>
-                <p className="text-sm opacity-80 mb-2 max-w-sm">Use the search portal below to find and review academic records. Toggle 'Use Credits' in the header to bypass your daily free limits and unlock detailed marks.</p>
+                <div className="flex flex-wrap items-center gap-3 mb-2">
+                  <h2 className="text-xl sm:text-2xl font-black">Welcome back, {formatFirstName(currentUser.name)}!</h2>
+                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
+                    Live Database
+                  </div>
+                </div>
+
+                <div className={`inline-block px-4 py-1.5 mb-5 rounded-[0.85rem] border text-[11px] sm:text-sm font-bold opacity-90 ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-black/20 border-white/10'}`}>
+                  Check result before time &nbsp;|&nbsp; Marks &nbsp;|&nbsp; Other's Result
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
+                    <Search size={12}/> Free Name Searches: <span className={theme==='light' ? 'text-white' : 'text-amber-400'}>{freeAttempts.name}</span>
+                  </div>
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
+                    <Activity size={12}/> Free Result Views: <span className={theme==='light' ? 'text-white' : 'text-amber-400'}>{freeAttempts.result}</span>
+                  </div>
+                </div>
                 
                 {(freeAttempts.name <= 0 || freeAttempts.result <= 0) && !useCredits && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
@@ -541,7 +558,6 @@ export default function DashboardPage() {
                         <Users className={`absolute left-2.5 top-2.5 ${t.textMuted}`} size={14} />
                         <select value={section} onChange={(e) => setSection(e.target.value)} className={`w-full appearance-none ${t.inputBg} border ${t.border} rounded-lg pl-8 pr-6 py-2 text-xs focus:outline-none ${t.inputFocus}`}>
                           <option value="All">All Sections</option>
-                          {/* DYNAMIC CASCADING SECTIONS */}
                           {filterOptions.sections
                             .filter(s => 
                               (session === "All" || s.session_id === parseInt(session)) && 
@@ -596,50 +612,58 @@ export default function DashboardPage() {
                       {expandedReg === student.reg && studentDetails && (
                         <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className={`border-t ${t.border} overflow-hidden ${theme === 'light' ? 'bg-slate-50/50' : 'bg-[#00122a]/30'}`}>
                           <div className="p-3 sm:p-4 space-y-4">
-                            {!useCredits && (
-                              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
-                                <Lock size={12} /> Free View: Detailed marks hidden. Turn on credits for full transcript.
+                            {studentDetails.length === 0 ? (
+                              <div className="text-center py-6 opacity-60 font-medium text-sm">
+                                No Records found.
                               </div>
-                            )}
+                            ) : (
+                              <>
+                                {!useCredits && (
+                                  <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
+                                    <Lock size={12} /> Free View: Detailed marks hidden. Turn on credits for full transcript.
+                                  </div>
+                                )}
 
-                            {studentDetails.map((sem: any, sIdx: number) => (
-                              <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${theme === 'light' ? 'bg-white' : 'bg-[#001c4d]'} overflow-hidden shadow-sm`}>
-                                <div className={`px-3 py-2 text-xs font-black uppercase tracking-wider ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
-                                  Semester {sem.semNum}
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-left text-[11px] sm:text-xs whitespace-nowrap">
-                                    <thead className={`border-b ${t.border} text-opacity-80`}>
-                                      <tr>
-                                        <th className="px-2 py-1.5 font-bold">Sub</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Mid</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Sess</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Fin</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Pr.S</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Pr.F</th>
-                                        <th className="px-2 py-1.5 text-center font-bold">Tot</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                                      {sem.courses.map((course: any, cIdx: number) => (
-                                        <tr key={cIdx} className={t.rowHover}>
-                                          <td className="px-2 py-1.5 max-w-[100px] sm:max-w-[150px] truncate" title={course.name}>
-                                            <span className="font-semibold">{course.name}</span>
-                                            <span className="block text-[9px] opacity-70 font-mono mt-0.5">{course.code}</span>
-                                          </td>
-                                          <td className="px-2 py-1.5 text-center font-mono">{course.mid ?? "-"}</td>
-                                          <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.sess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                          <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.fin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                          <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prSess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                          <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prFin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                          <td className={`px-2 py-1.5 text-center font-mono font-bold ${useCredits ? t.primary : ''}`}>{useCredits ? (course.tot ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </div>
-                            ))}
+                                {studentDetails.map((sem: any, sIdx: number) => (
+                                  <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${theme === 'light' ? 'bg-white' : 'bg-[#001c4d]'} overflow-hidden shadow-sm`}>
+                                    <div className={`px-3 py-2 text-xs font-black uppercase tracking-wider ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
+                                      Semester {sem.semNum}
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-left text-[11px] sm:text-xs whitespace-nowrap">
+                                        <thead className={`border-b ${t.border} text-opacity-80`}>
+                                          <tr>
+                                            <th className="px-2 py-1.5 font-bold">Sub</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Mid</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Sess</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Fin</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Pr.S</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Pr.F</th>
+                                            <th className="px-2 py-1.5 text-center font-bold">Tot</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                                          {sem.courses.map((course: any, cIdx: number) => (
+                                            <tr key={cIdx} className={t.rowHover}>
+                                              <td className="px-2 py-1.5 max-w-[100px] sm:max-w-[150px] truncate" title={course.name}>
+                                                <span className="font-semibold">{course.name}</span>
+                                                <span className="block text-[9px] opacity-70 font-mono mt-0.5">{course.code}</span>
+                                              </td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{course.mid ?? "-"}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.sess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.fin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prSess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prFin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className={`px-2 py-1.5 text-center font-mono font-bold ${useCredits ? t.primary : ''}`}>{useCredits ? (course.tot ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                ))}
+                              </>
+                            )}
                           </div>
                         </motion.div>
                       )}
@@ -663,24 +687,20 @@ export default function DashboardPage() {
             <div className={`p-6 rounded-[1.5rem] text-center border ${theme === 'light' ? 'bg-gradient-to-b from-white to-slate-50 border-slate-200 shadow-sm' : 'bg-gradient-to-b from-[#001c4d] to-[#00122a] border-[#00348c]'}`}>
                <Wallet size={36} className={`mx-auto mb-3 ${t.primary}`}/>
                <h3 className={`text-sm font-bold uppercase tracking-widest ${t.textMuted} mb-1`}>Available Balance</h3>
-               <div className="text-4xl sm:text-5xl font-black">{credits.toLocaleString()} <span className="text-xl font-medium opacity-50">CRD</span></div>
+               <div className="text-4xl sm:text-5xl font-black">{credits.toLocaleString()} <span className="text-xl font-medium opacity-50">Credits</span></div>
             </div>
 
             <div>
               <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><TrendingUp size={18}/> Top-up Plans</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { id: 'pkg1', price: 'Rs 500', credits: '10,000', label: 'Basic' },
-                  { id: 'pkg2', price: 'Rs 1000', credits: '25,000', label: 'Pro', pop: true },
-                  { id: 'pkg3', price: 'Rs 5000', credits: 'Lifetime', label: 'Max (10/day)' },
-                ].map(pkg => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {packages.map(pkg => (
                   <div key={pkg.id} onClick={() => setPaymentForm({ ...paymentForm, package: pkg.id })}
                     className={`cursor-pointer p-4 rounded-xl border-2 transition-all relative overflow-hidden ${paymentForm.package === pkg.id ? "border-amber-500 bg-amber-500/10" : t.border + " " + t.cardBg}`}
                   >
                     {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg">Popular</div>}
                     <div className="text-xs font-bold opacity-70 mb-1">{pkg.label}</div>
-                    <div className="text-xl font-black mb-2">{pkg.price}</div>
-                    <div className={`inline-block text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Crd</div>
+                    <div className="text-base sm:text-lg font-black mb-2">{pkg.price}</div>
+                    <div className={`inline-block text-[10px] sm:text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Credits</div>
                   </div>
                 ))}
               </div>
@@ -696,6 +716,13 @@ export default function DashboardPage() {
                     <p>Account Title: IUB Portal Technologies</p>
                   </div>
                   
+                  {paymentForm.package === 'custom' && (
+                    <div className="mb-2">
+                      <input type="number" placeholder="Enter Custom Amount (Rs)" value={paymentForm.amount} onChange={(e) => setPaymentForm({...paymentForm, amount: e.target.value})}
+                        className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 text-sm focus:outline-none ${t.inputFocus}`} />
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input type="text" placeholder="Your Name on Bank Account" value={paymentForm.name} onChange={(e) => setPaymentForm({...paymentForm, name: e.target.value})}
                       className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 text-sm focus:outline-none ${t.inputFocus}`} />
@@ -733,7 +760,7 @@ export default function DashboardPage() {
                        <tr key={`dep-${i}`} className="hover:bg-slate-500/5">
                          <td className="px-4 py-3 font-mono opacity-70">{new Date(dep.created_at).toLocaleDateString()}</td>
                          <td className="px-4 py-3 font-semibold text-emerald-500">Deposit</td>
-                         <td className="px-4 py-3 opacity-80">{dep.package_id} via {dep.account_name}</td>
+                         <td className="px-4 py-3 opacity-80">Rs {dep.amount} via {dep.account_name}</td>
                          <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
                            {dep.status.toUpperCase()}
                          </td>
