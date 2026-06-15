@@ -6,7 +6,8 @@ import {
   Search, Building, Calendar, Users, 
   Sun, Moon, ChevronDown, ChevronUp, Lock,
   Menu, CreditCard, History, Share2, Wallet,
-  CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle
+  CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle,
+  ShieldAlert, DollarSign, UsersRound, Crown, FileSearch
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
@@ -14,6 +15,8 @@ import { createBrowserClient } from '@supabase/ssr';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
+
+const ADMIN_REG = "S25BARIN1M01118";
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
@@ -47,12 +50,16 @@ export default function DashboardPage() {
   
   const [theme, setTheme] = useState<Theme>("dark");
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading..." });
+  
+  const isAdmin = currentUser.reg === ADMIN_REG;
+
   const [credits, setCredits] = useState(0);
   const [useCredits, setUseCredits] = useState(false);
-  const [freeAttempts, setFreeAttempts] = useState({ name: 3, result: 3 });
+  const [freeAttempts, setFreeAttempts] = useState(4);
+  const [viewedRegsThisSession, setViewedRegsThisSession] = useState<string[]>([]);
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits" | "admin">("home");
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -87,27 +94,28 @@ export default function DashboardPage() {
         }
 
         let actualReg = "UNKNOWN";
-        const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).single();
+        const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).maybeSingle();
         if (userRecord?.reg) {
           actualReg = userRecord.reg;
         }
 
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          const { data: studentNameRes } = await supabase.from("students").select("name").eq("reg", actualReg).single();
+          const { data: studentNameRes } = await supabase.from("students").select("name").eq("reg", actualReg).maybeSingle();
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
 
         setCurrentUser({ reg: actualReg, name: actualName });
 
         if (actualReg !== "UNKNOWN") {
-          const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).single();
+          // Using maybeSingle prevents crashes if the wallet doesn't exist for new users yet
+          const { data: userCreditsRes } = await supabase.from("user_credits").select("*").eq("user_reg", actualReg).maybeSingle();
           if (userCreditsRes) {
             setCredits(userCreditsRes.credits || 0);
-            setFreeAttempts({
-              name: Math.max(0, 3 - (userCreditsRes.free_name_searches_today || 0)),
-              result: Math.max(0, 3 - (userCreditsRes.free_reg_searches_today || 0))
-            });
+            setFreeAttempts(Math.max(0, 4 - (userCreditsRes.free_searches_today || 0)));
+          } else {
+            setCredits(0);
+            setFreeAttempts(4);
           }
         }
 
@@ -132,9 +140,7 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    if (activeTab === "credits") {
-      loadCreditsHistory();
-    }
+    if (activeTab === "credits") loadCreditsHistory();
   }, [activeTab]);
 
   const loadCreditsHistory = async () => {
@@ -197,13 +203,30 @@ export default function DashboardPage() {
     }
   };
 
+  const deductFreeAttempt = async () => {
+    if (isAdmin || useCredits) return true;
+    if (freeAttempts <= 0) {
+      showToast("Limits Exhausted", "Turn on Use Credits or check tomorrow.", "error");
+      return false;
+    }
+    const newCount = freeAttempts - 1;
+    setFreeAttempts(newCount);
+    try {
+      await supabase.from("user_credits").update({ free_searches_today: 4 - newCount }).eq("user_reg", currentUser.reg);
+    } catch (e) {
+      console.error("Failed to sync free attempts", e);
+    }
+    return true;
+  };
+
   const handleSearch = async (e?: React.FormEvent, newPage = 0) => {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
     
-    if (!useCredits && searchMode === "Name" && freeAttempts.name <= 0) {
-      showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
-      return;
+    // Deduct attempt if searching by Name (which searches multiple people)
+    if (searchMode === "Name" && newPage === 0 && !isAdmin && !useCredits) {
+      const allowed = await deductFreeAttempt();
+      if (!allowed) return;
     }
 
     setIsSearching(true);
@@ -244,14 +267,6 @@ export default function DashboardPage() {
       
       if (error) throw error;
 
-      if (searchMode === "Name" && !useCredits && newPage === 0) {
-        setFreeAttempts(p => ({ ...p, name: p.name - 1 }));
-        await supabase
-          .from("user_credits")
-          .update({ free_name_searches_today: 3 - (freeAttempts.name - 1) })
-          .eq("user_reg", currentUser.reg);
-      }
-
       setSearchResults((data || []).map((s: any) => ({
         id: s.id, reg: s.reg, name: s.name,
         session: s.academic_sessions?.session_code || "N/A",
@@ -275,38 +290,34 @@ export default function DashboardPage() {
       return;
     }
 
-    const isOwnResult = reg.toLowerCase() === currentUser.reg.toLowerCase();
-    const cost = isOwnResult ? 100 : 200;
+    if (!isAdmin) {
+      const isOwnResult = reg.toLowerCase() === currentUser.reg.toLowerCase();
+      const cost = isOwnResult ? 100 : 200;
 
-    if (useCredits) {
-      if (credits < cost) {
-        showToast("Insufficient Credits", `You need ${cost} credits to view this result.`, "error");
-        setActiveTab("credits");
-        return;
-      }
-      setCredits(p => p - cost);
-    } else {
-      if (freeAttempts.result <= 0) {
-        showToast("Limits Exhausted", "Use credits or check tomorrow for free attempts.", "error");
-        return;
+      if (useCredits) {
+        if (credits < cost) {
+          showToast("Insufficient Credits", `You need ${cost} credits to view this result.`, "error");
+          setActiveTab("credits");
+          return;
+        }
+        setCredits(p => p - cost);
+      } else {
+        // If searching a specific result and not viewed today, deduct free attempt
+        if (!viewedRegsThisSession.includes(reg)) {
+          const allowed = await deductFreeAttempt();
+          if (!allowed) return;
+          setViewedRegsThisSession(prev => [...prev, reg]);
+        }
       }
     }
 
     setExpandedReg(reg);
     logSearch(searchQuery, "View Result", reg);
 
-    if (!useCredits) {
-      setFreeAttempts(p => ({ ...p, result: p.result - 1 }));
-      await supabase
-        .from("user_credits")
-        .update({ free_reg_searches_today: 3 - (freeAttempts.result - 1) })
-        .eq("user_reg", currentUser.reg);
-    }
-
     try {
-      const columns = useCredits 
-        ? "id, semester_num, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours)"
-        : "id, semester_num, mid_term_marks, total_marks, subject_id (course_code, course_name)";
+      const columns = (isAdmin || useCredits)
+        ? "id, semester, semester_num, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours)"
+        : "id, semester, semester_num, mid_term_marks, subject_id (course_code, course_name)";
 
       const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId);
       if (error) throw error;
@@ -317,7 +328,8 @@ export default function DashboardPage() {
       }
 
       const grouped = records.reduce((acc: any, rec: any) => {
-        const sem = rec.semester_num || "General";
+        // Fix: Checks both common column names for semester grouping
+        const sem = rec.semester || rec.semester_num || "General";
         if (!acc[sem]) acc[sem] = [];
         acc[sem].push({
           code: rec.subject_id?.course_code || "N/A",
@@ -332,7 +344,12 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      const sortedSemesters = Object.keys(grouped).sort((a, b) => Number(b) - Number(a)).map(sem => ({
+      // Sort Semesters from latest (highest number) to earliest
+      const sortedSemesters = Object.keys(grouped).sort((a, b) => {
+        const numA = parseInt(a.replace(/\D/g, '')) || 0;
+        const numB = parseInt(b.replace(/\D/g, '')) || 0;
+        return numB - numA;
+      }).map(sem => ({
         semNum: sem,
         courses: grouped[sem]
       }));
@@ -393,7 +410,7 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      {/* HEADER - Mobile Optimized completely */}
+      {/* HEADER */}
       <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-2 sm:px-4 py-3 flex justify-between items-center`}>
         <div className="flex items-center gap-1.5 sm:gap-3">
           <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
@@ -413,31 +430,55 @@ export default function DashboardPage() {
         </div>
         
         <div className="flex items-center gap-1.5 sm:gap-3">
-          <div className="flex items-center gap-1">
-            <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
-              Use Credits
-            </span>
+          
+          {isAdmin && (
             <button 
-              onClick={() => setUseCredits(!useCredits)}
-              className={`w-8 h-4 sm:w-9 sm:h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
+              onClick={() => setActiveTab("admin")}
+              className={`flex items-center gap-1 px-2 py-1.5 sm:px-3 rounded-lg bg-red-500 text-white transition-all text-xs font-bold shadow-md`}
             >
-              <motion.div animate={{ x: useCredits ? (typeof window !== 'undefined' && window.innerWidth < 640 ? 16 : 16) : 0 }} className="bg-white w-3 h-3 sm:w-4 sm:h-4 rounded-full shadow-sm"/>
+              <ShieldAlert size={14} />
+              <span className="hidden sm:inline">Admin</span>
             </button>
-          </div>
+          )}
 
-          <button 
-            onClick={() => setActiveTab("credits")}
-            className={`flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
-          >
-            <Wallet size={14} className={t.primary} />
-            <span>{credits.toLocaleString()}</span>
-          </button>
+          {!isAdmin && (
+            <>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
+                  Use Credits
+                </span>
+                <button 
+                  onClick={() => setUseCredits(!useCredits)}
+                  className={`w-8 h-4 sm:w-9 sm:h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
+                >
+                  <motion.div animate={{ x: useCredits ? (typeof window !== 'undefined' && window.innerWidth < 640 ? 16 : 16) : 0 }} className="bg-white w-3 h-3 sm:w-4 sm:h-4 rounded-full shadow-sm"/>
+                </button>
+              </div>
+
+              <button 
+                onClick={() => setActiveTab("credits")}
+                className={`flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
+              >
+                <Wallet size={14} className={t.primary} />
+                <span>{credits.toLocaleString()}</span>
+              </button>
+            </>
+          )}
 
           <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'}`}>
             {theme === "light" ? <Sun size={14} className="sm:w-4 sm:h-4" /> : <Moon size={14} className="sm:w-4 sm:h-4" />}
           </button>
         </div>
       </header>
+
+      {/* THIN NANO SUB-HEADER */}
+      <div className={`w-full py-1.5 text-[9px] sm:text-[11px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-3 border-b ${t.border} ${theme === 'light' ? 'bg-slate-100/80 text-slate-500' : 'bg-[#000a1a]/80 text-blue-400/60'}`}>
+        <span>Check Result Before time</span>
+        <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
+        <span>Marks</span>
+        <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
+        <span>Other's Result</span>
+      </div>
 
       {/* SIDEBAR DRAWER */}
       <AnimatePresence>
@@ -449,7 +490,7 @@ export default function DashboardPage() {
             >
               <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${t.btnPrimary}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-red-500 text-white' : t.btnPrimary}`}>
                     {currentUser.name.charAt(0)}
                   </div>
                   <div className="leading-tight">
@@ -463,15 +504,26 @@ export default function DashboardPage() {
                 <button onClick={() => { setActiveTab('home'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'home' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <Search size={18} /> Search Portal
                 </button>
-                <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
-                  <CreditCard size={18} /> Credits & Wallet
-                </button>
-                <button onClick={() => { setActiveTab('history'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'history' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
-                  <History size={18} /> Unlock History
-                </button>
-                <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
-                  <Share2 size={18} /> Referral Program
-                </button>
+                
+                {isAdmin && (
+                  <button onClick={() => { setActiveTab('admin'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-red-500 text-white' : "hover:bg-slate-500/10"}`}>
+                    <ShieldAlert size={18} /> Admin Dashboard
+                  </button>
+                )}
+
+                {!isAdmin && (
+                  <>
+                    <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <CreditCard size={18} /> Credits & Wallet
+                    </button>
+                    <button onClick={() => { setActiveTab('history'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'history' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <History size={18} /> Unlock History
+                    </button>
+                    <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <Share2 size={18} /> Referral Program
+                    </button>
+                  </>
+                )}
               </div>
             </motion.div>
           </>
@@ -480,39 +532,98 @@ export default function DashboardPage() {
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-6 py-6 z-10">
         
+        {/* TAB: ADMIN (ONLY SHOWN TO ADMIN) */}
+        {isAdmin && activeTab === "admin" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <h2 className="text-2xl font-black mb-4 flex items-center gap-2">
+              <ShieldAlert className="text-red-500" /> Admin Command Center
+            </h2>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {[
+                { title: "Sales", value: "142", icon: <CreditCard size={16} /> },
+                { title: "Pending Approvals", value: "14", icon: <CheckCircle2 size={16} />, alert: true },
+                { title: "Total Users", value: "8,245", icon: <UsersRound size={16} /> },
+                { title: "Premium Users", value: "412", icon: <Crown size={16} className="text-amber-500" /> },
+                { title: "Profit Earned", value: "Rs 85,400", icon: <DollarSign size={16} className="text-emerald-500" /> },
+                { title: "Results Searched", value: "45,892", icon: <FileSearch size={16} /> },
+              ].map((stat, i) => (
+                <div key={i} className={`p-4 rounded-2xl border ${t.border} ${t.cardBg} relative overflow-hidden`}>
+                  {stat.alert && <div className="absolute top-0 right-0 w-2 h-2 m-4 rounded-full bg-red-500 animate-pulse"></div>}
+                  <div className={`text-xs font-bold opacity-70 mb-2 flex items-center gap-1.5`}>
+                    {stat.icon} {stat.title}
+                  </div>
+                  <div className="text-xl sm:text-2xl font-black">{stat.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className={`mt-8 p-5 rounded-[1.5rem] border ${t.border} ${t.cardBg}`}>
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Share2 size={18}/> Referral Leaderboard</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className={`bg-slate-500/5 text-opacity-80`}>
+                    <tr>
+                      <th className="px-4 py-2 font-bold rounded-tl-lg">Rank</th>
+                      <th className="px-4 py-2 font-bold">Registration</th>
+                      <th className="px-4 py-2 font-bold text-right rounded-tr-lg">Credits Earned</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-500/10">
+                    <tr className="hover:bg-slate-500/5">
+                      <td className="px-4 py-3 font-black text-amber-500">#1</td>
+                      <td className="px-4 py-3 font-semibold">F20BSCS1M021</td>
+                      <td className="px-4 py-3 text-right font-bold text-emerald-500">45,000</td>
+                    </tr>
+                    <tr className="hover:bg-slate-500/5">
+                      <td className="px-4 py-3 font-bold opacity-80">#2</td>
+                      <td className="px-4 py-3 font-semibold">F21BSSE1M110</td>
+                      <td className="px-4 py-3 text-right font-bold text-emerald-500">12,500</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* TAB: HOME (SEARCH PORTAL) */}
         {activeTab === "home" && (
           <>
             <div className={`relative overflow-hidden rounded-[1.5rem] p-5 sm:p-6 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
-              <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none transform translate-x-4 -translate-y-4">
+              <div className="absolute top-0 left-0 p-4 opacity-10 pointer-events-none transform -translate-x-4 -translate-y-4">
                 <GraduationCap size={140} />
               </div>
               
-              <div className="relative z-10">
-                <div className="flex flex-wrap items-center gap-3 mb-2">
-                  <h2 className="text-xl sm:text-2xl font-black">Welcome back, {formatFirstName(currentUser.name)}!</h2>
-                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
-                    Live Database
+              <div className="relative z-10 flex flex-col h-full justify-between">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h2 className="text-xl sm:text-3xl font-black mb-1">Welcome back, {formatFirstName(currentUser.name)}!</h2>
+                    <p className="text-xs sm:text-sm opacity-80 max-w-sm">Use the search portal below to find and review academic records.</p>
+                  </div>
+                  
+                  {/* Live Database & Nano Free Attempts */}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
+                      Live Database
+                    </div>
+                    {!isAdmin && (
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] font-bold`}>
+                        <Activity size={10} className="opacity-70"/> Free Attempts: <span className={theme==='light' ? 'text-white font-black' : 'text-amber-400 font-black'}>{freeAttempts}/4</span>
+                      </div>
+                    )}
+                    {isAdmin && (
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-red-500/20 border-red-500/30 text-red-200 text-[10px] font-bold`}>
+                        <ShieldAlert size={10}/> Admin Mode Active
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className={`inline-block px-4 py-1.5 mb-5 rounded-[0.85rem] border text-[11px] sm:text-sm font-bold opacity-90 ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-black/20 border-white/10'}`}>
-                  Check result before time &nbsp;|&nbsp; Marks &nbsp;|&nbsp; Other's Result
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
-                    <Search size={12}/> Free Name Searches: <span className={theme==='light' ? 'text-white' : 'text-amber-400'}>{freeAttempts.name}</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
-                    <Activity size={12}/> Free Result Views: <span className={theme==='light' ? 'text-white' : 'text-amber-400'}>{freeAttempts.result}</span>
-                  </div>
-                </div>
-                
-                {(freeAttempts.name <= 0 || freeAttempts.result <= 0) && !useCredits && (
+                {(freeAttempts <= 0) && !useCredits && !isAdmin && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                    className="mt-4 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
+                    className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
                   >
                     <Lock size={14}/> <span>Free attempts ended. Turn on <b>Use Credits</b> or check tomorrow.</span>
                     <button onClick={() => setActiveTab('credits')} className="ml-2 underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
@@ -618,7 +729,7 @@ export default function DashboardPage() {
                               </div>
                             ) : (
                               <>
-                                {!useCredits && (
+                                {!useCredits && !isAdmin && (
                                   <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
                                     <Lock size={12} /> Free View: Detailed marks hidden. Turn on credits for full transcript.
                                   </div>
@@ -650,11 +761,11 @@ export default function DashboardPage() {
                                                 <span className="block text-[9px] opacity-70 font-mono mt-0.5">{course.code}</span>
                                               </td>
                                               <td className="px-2 py-1.5 text-center font-mono">{course.mid ?? "-"}</td>
-                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.sess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.fin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prSess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-1.5 text-center font-mono">{useCredits ? (course.prFin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
-                                              <td className={`px-2 py-1.5 text-center font-mono font-bold ${useCredits ? t.primary : ''}`}>{useCredits ? (course.tot ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{(isAdmin || useCredits) ? (course.sess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{(isAdmin || useCredits) ? (course.fin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{(isAdmin || useCredits) ? (course.prSess ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-1.5 text-center font-mono">{(isAdmin || useCredits) ? (course.prFin ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
+                                              <td className={`px-2 py-1.5 text-center font-mono font-bold ${(isAdmin || useCredits) ? t.primary : ''}`}>{(isAdmin || useCredits) ? (course.tot ?? "-") : <Lock size={10} className="mx-auto opacity-50"/>}</td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -681,8 +792,8 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* TAB: CREDITS */}
-        {activeTab === "credits" && (
+        {/* TAB: CREDITS (ONLY SHOWN TO NORMAL USERS) */}
+        {!isAdmin && activeTab === "credits" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl mx-auto">
             <div className={`p-6 rounded-[1.5rem] text-center border ${theme === 'light' ? 'bg-gradient-to-b from-white to-slate-50 border-slate-200 shadow-sm' : 'bg-gradient-to-b from-[#001c4d] to-[#00122a] border-[#00348c]'}`}>
                <Wallet size={36} className={`mx-auto mb-3 ${t.primary}`}/>
@@ -700,7 +811,7 @@ export default function DashboardPage() {
                     {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg">Popular</div>}
                     <div className="text-xs font-bold opacity-70 mb-1">{pkg.label}</div>
                     <div className="text-base sm:text-lg font-black mb-2">{pkg.price}</div>
-                    <div className={`inline-block text-[10px] sm:text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Credits</div>
+                    <div className={`inline-block text-[10px] sm:text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits}</div>
                   </div>
                 ))}
               </div>
@@ -781,16 +892,16 @@ export default function DashboardPage() {
           </motion.div>
         )}
 
-        {/* TAB: HISTORY */}
-        {activeTab === "history" && (
+        {/* TAB: HISTORY (ONLY SHOWN TO NORMAL USERS) */}
+        {!isAdmin && activeTab === "history" && (
           <div className={`${t.cardBg} border ${t.border} p-6 rounded-[1.5rem]`}>
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><History size={20}/> Unlocked Records</h3>
             <p className="text-sm opacity-70">Saved unlocks will appear here. Re-viewing them does not cost credits unless you are fetching a newly updated semester.</p>
           </div>
         )}
 
-        {/* TAB: REFERRAL */}
-        {activeTab === "referral" && (
+        {/* TAB: REFERRAL (ONLY SHOWN TO NORMAL USERS) */}
+        {!isAdmin && activeTab === "referral" && (
           <div className={`${t.cardBg} border ${t.border} p-8 rounded-[1.5rem] text-center`}>
             <div className={`w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-gradient-to-br from-[#0056b3] to-[#00348c] shadow-lg text-white`}>
               <Share2 size={28} />
