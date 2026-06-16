@@ -519,8 +519,8 @@ export default function DashboardPage() {
 
     try {
       const columns = (isAdmin || useCredits)
-        ? "id, semester, semester_num, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours)"
-        : "id, semester, semester_num, mid_term_marks, subject_id (course_code, course_name)";
+        ? "id, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester"
+        : "id, mid_term_marks, subject_id (course_code, course_name), semester_num, semester";
 
       const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId); 
       if (error) throw error;
