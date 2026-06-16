@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Building, Calendar, Users, 
   Sun, Moon, ChevronDown, ChevronUp, Lock,
   Menu, CreditCard, History, Share2, Wallet,
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle,
-  ShieldAlert, DollarSign, UsersRound, Crown, FileSearch
+  ShieldAlert, DollarSign, UsersRound, Crown, FileSearch, ArrowRight, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
@@ -21,6 +21,7 @@ const ADMIN_REG = "S25BARIN1M01118";
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
+type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats";
 
 interface FilterItem {
   id: number;
@@ -47,11 +48,21 @@ interface HistoryLogs {
   usage: any[];
 }
 
+interface ChatMessage {
+  id: string;
+  sender_reg: string;
+  receiver_reg: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+  is_delivered: boolean;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   
   const [theme, setTheme] = useState<Theme>("dark");
-  const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading..." });
+  const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading...", phone: "", email: "" });
   
   const isAdmin = currentUser.reg === ADMIN_REG;
 
@@ -61,7 +72,7 @@ export default function DashboardPage() {
   const [viewedRegsThisSession, setViewedRegsThisSession] = useState<string[]>([]);
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "history" | "referral" | "credits">("home");
+  const [activeTab, setActiveTab] = useState<TabState>("home");
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -86,17 +97,20 @@ export default function DashboardPage() {
   const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
-  // REAL ADMIN STATES
+  // ADMIN STATES
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
-  const [adminStats, setAdminStats] = useState({
-    sales: 0,
-    pending: 0,
-    totalUsers: 0,
-    premiumUsers: 0,
-    profit: 0,
-    searches: 0
-  });
+  const [approvedHistory, setApprovedHistory] = useState<any[]>([]);
+  const [adminStats, setAdminStats] = useState({ sales: 0, pending: 0, totalUsers: 0, premiumUsers: 0, profit: 0, searches: 0 });
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
+
+  // CHAT STATES
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [adminChatList, setAdminChatList] = useState<{reg: string, name: string, unread: number}[]>([]);
+  const [activeAdminChatUser, setActiveAdminChatUser] = useState<string | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -109,19 +123,18 @@ export default function DashboardPage() {
         }
 
         let actualReg = "UNKNOWN";
-        const { data: userRecord } = await supabase.from("users").select("reg").eq("email", session.user.email).maybeSingle();
+        const { data: userRecord } = await supabase.from("users").select("reg, phone, email").eq("email", session.user.email).maybeSingle();
         if (userRecord?.reg) {
-          actualReg = userRecord.reg.toUpperCase(); // Force Uppercase to fix matching issues
+          actualReg = userRecord.reg.toUpperCase();
         }
 
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          // ILIKE makes the search case-insensitive just in case
           const { data: studentNameRes } = await supabase.from("students").select("name").ilike("reg", actualReg).maybeSingle();
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
 
-        setCurrentUser({ reg: actualReg, name: actualName });
+        setCurrentUser({ reg: actualReg, name: actualName, phone: userRecord?.phone || "", email: userRecord?.email || "" });
 
         if (actualReg !== "UNKNOWN") {
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
@@ -146,9 +159,11 @@ export default function DashboardPage() {
           sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
         });
 
-        // Load Real Admin Data if Admin
         if (actualReg === ADMIN_REG) {
           loadRealAdminData();
+          loadAdminChatList();
+        } else {
+          checkUnreadMessages(actualReg);
         }
 
       } catch (error) {
@@ -161,18 +176,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (activeTab === "credits") loadCreditsHistory();
+    if (activeTab === "contact" && !isAdmin) loadUserChat();
+    if (activeTab === "admin_chats" && isAdmin) loadAdminChatList();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   const loadRealAdminData = async () => {
     try {
-      // 1. Get Pending Approvals Table Data
       const { data: pendingData } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
       setPendingApprovals(pendingData || []);
 
-      // 2. Get Aggregated Stats
-      const { data: approvedPayments } = await supabase.from('payments_record').select('amount').eq('status', 'approved');
-      const totalProfit = approvedPayments?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0;
-      const totalSales = approvedPayments?.length || 0;
+      const { data: approvedData } = await supabase.from('payments_record').select('*').eq('status', 'approved').order('created_at', { ascending: false });
+      setApprovedHistory(approvedData || []);
+
+      const totalProfit = approvedData?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0;
+      const totalSales = approvedData?.length || 0;
 
       const { count: userCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
       const { count: premiumCount } = await supabase.from('user_credits').select('*', { count: 'exact', head: true }).gt('credits', 0);
@@ -187,10 +210,8 @@ export default function DashboardPage() {
         searches: searchCount || 0
       });
 
-      // 3. Get Top Users for Leaderboard (Highest Credits)
       const { data: topUsers } = await supabase.from('user_credits').select('user_reg, credits').order('credits', { ascending: false }).limit(10);
       setLeaderboard(topUsers || []);
-
     } catch (e) {
       console.error("Failed to load admin stats", e);
     }
@@ -214,23 +235,105 @@ export default function DashboardPage() {
 
   const handleAdminApprove = async (paymentId: string, reg: string, amount: number) => {
     try {
-      // Force uppercase for matching
-      const targetReg = reg.toUpperCase();
-      
-      const { error } = await supabase.rpc('approve_payment_and_credit', {
-        p_payment_id: paymentId,
-        p_user_reg: targetReg,
-        p_amount: amount
-      });
-
+      const { error } = await supabase.rpc('approve_payment_and_credit', { p_payment_id: paymentId, p_user_reg: reg.toUpperCase(), p_amount: amount });
       if (error) throw error;
-
-      showToast("Approved", `Approved Rs ${amount} for ${targetReg}.`, "info");
-      loadRealAdminData(); // Refresh all live admin stats
+      showToast("Approved", `Approved Rs ${amount} for ${reg}.`, "info");
+      loadRealAdminData();
     } catch (e) {
-      console.error(e);
-      showToast("Error", "Failed to approve payment. Check RPC function in Supabase.", "error");
+      showToast("Error", "Failed to approve payment.", "error");
     }
+  };
+
+  const handleAdminReverse = async (paymentId: string, reg: string, amount: number) => {
+    try {
+      const { error } = await supabase.rpc('reverse_payment_and_credit', { p_payment_id: paymentId, p_user_reg: reg.toUpperCase(), p_amount: amount });
+      if (error) throw error;
+      showToast("Reversed", `Reversed Rs ${amount} for ${reg}.`, "info");
+      loadRealAdminData();
+    } catch (e) {
+      showToast("Error", "Failed to reverse payment.", "error");
+    }
+  };
+
+  // --- CHAT LOGIC ---
+  const checkUnreadMessages = async (reg: string) => {
+    try {
+      const { count } = await supabase.from('messages').select('*', { count: 'exact', head: true }).eq('receiver_reg', reg).eq('is_read', false);
+      if (count && count > 0) setHasUnreadMessages(true);
+    } catch (e) {}
+  };
+
+  const loadUserChat = async () => {
+    setHasUnreadMessages(false);
+    try {
+      const { data } = await supabase.from('messages').select('*')
+        .or(`sender_reg.eq.${currentUser.reg},receiver_reg.eq.${currentUser.reg}`)
+        .order('created_at', { ascending: true });
+      setChatMessages(data || []);
+      
+      // Mark as read
+      await supabase.from('messages').update({ is_read: true }).eq('receiver_reg', currentUser.reg).eq('is_read', false);
+    } catch (e) {}
+  };
+
+  const loadAdminChatList = async () => {
+    try {
+      const { data } = await supabase.rpc('get_admin_chat_list'); // Requires a custom SQL view or RPC in Supabase. Falling back to simple fetch.
+      // Mocking for now: fetch all unique senders
+      const { data: msgs } = await supabase.from('messages').select('sender_reg, is_read').eq('receiver_reg', ADMIN_REG);
+      if (msgs) {
+        const uniqueUsers = Array.from(new Set(msgs.map(m => m.sender_reg)));
+        const list = uniqueUsers.map(reg => {
+           const unread = msgs.filter(m => m.sender_reg === reg && !m.is_read).length;
+           return { reg, name: "User", unread };
+        });
+        setAdminChatList(list);
+        const totalUnread = list.reduce((sum, u) => sum + u.unread, 0);
+        setHasUnreadMessages(totalUnread > 0);
+      }
+    } catch(e) {}
+  };
+
+  const loadAdminSingleChat = async (reg: string) => {
+    setActiveAdminChatUser(reg);
+    try {
+      const { data } = await supabase.from('messages').select('*')
+        .or(`and(sender_reg.eq.${reg},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${reg})`)
+        .order('created_at', { ascending: true });
+      setChatMessages(data || []);
+      await supabase.from('messages').update({ is_read: true }).eq('sender_reg', reg).eq('receiver_reg', ADMIN_REG);
+      loadAdminChatList();
+    } catch (e) {}
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim()) return;
+    try {
+      const receiver = isAdmin ? activeAdminChatUser : ADMIN_REG;
+      if (!receiver) return;
+
+      if (editingMsgId) {
+        await supabase.from('messages').update({ content: chatInput }).eq('id', editingMsgId);
+        setEditingMsgId(null);
+      } else {
+        await supabase.from('messages').insert({
+          sender_reg: currentUser.reg,
+          receiver_reg: receiver,
+          content: chatInput,
+          is_delivered: true, // Auto true for DB
+          is_read: false
+        });
+      }
+      setChatInput("");
+      isAdmin ? loadAdminSingleChat(receiver) : loadUserChat();
+    } catch(e) {}
+  };
+
+  const handleDeleteMessage = async (id: string) => {
+    try {
+      await supabase.from('messages').delete().eq('id', id);
+      isAdmin && activeAdminChatUser ? loadAdminSingleChat(activeAdminChatUser) : loadUserChat();
+    } catch(e) {}
   };
 
   const showToast = (title: string, desc: string, type: 'error'|'info' = 'error') => {
@@ -247,20 +350,21 @@ export default function DashboardPage() {
     return parts[0];
   };
 
+  // Upgraded Theme Classes for better Light Mode contrast
   const t = {
-    bg: theme === "light" ? "bg-[#f8fafc]" : "bg-[#00122a]",
+    bg: theme === "light" ? "bg-[#f4f7f6]" : "bg-[#00122a]",
     text: theme === "light" ? "text-slate-800" : "text-slate-100",
     textMuted: theme === "light" ? "text-slate-500" : "text-blue-300/70",
-    cardBg: theme === "light" ? "bg-white" : "bg-[#001c4d]/80",
-    border: theme === "light" ? "border-slate-200" : "border-[#00348c]/50",
+    cardBg: theme === "light" ? "bg-white border-slate-300/60 shadow-md" : "bg-[#001c4d]/80 border-[#00348c]/50",
+    border: theme === "light" ? "border-slate-300/60" : "border-[#00348c]/50",
     primary: theme === "light" ? "text-[#0056b3]" : "text-amber-400",
-    inputBg: theme === "light" ? "bg-slate-50" : "bg-[#00122a]/50",
+    inputBg: theme === "light" ? "bg-slate-50 border-slate-300" : "bg-[#00122a]/50",
     inputFocus: theme === "light" ? "focus:border-[#0056b3] focus:ring-[#0056b3]/20" : "focus:border-amber-500 focus:ring-amber-500/30",
     btnPrimary: theme === "light" 
-      ? "bg-[#0056b3] hover:bg-[#004494] text-white shadow-[#0056b3]/20" 
+      ? "bg-[#0056b3] hover:bg-[#004494] text-white shadow-[#0056b3]/30" 
       : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-[#00122a] shadow-amber-500/20",
-    tableHeader: theme === "light" ? "bg-[#0056b3]/5 text-[#0056b3]" : "bg-[#00122a] text-amber-400/90",
-    rowHover: theme === "light" ? "hover:bg-slate-50/50" : "hover:bg-[#00205b]/40"
+    tableHeader: theme === "light" ? "bg-[#0056b3]/10 text-[#0056b3]" : "bg-[#00122a] text-amber-400/90",
+    rowHover: theme === "light" ? "hover:bg-slate-100" : "hover:bg-[#00205b]/40"
   };
 
   const selectStyles = {
@@ -286,7 +390,7 @@ export default function DashboardPage() {
     menu: (base: any) => ({
       ...base,
       backgroundColor: theme === 'light' ? '#ffffff' : '#001c4d',
-      border: `1px solid ${theme === 'light' ? '#e2e8f0' : '#00348c'}`,
+      border: `1px solid ${theme === 'light' ? '#cbd5e1' : '#00348c'}`,
       zIndex: 50
     }),
     option: (base: any, state: any) => ({
@@ -307,9 +411,7 @@ export default function DashboardPage() {
         search_type: type,
         viewed_target_reg: targetReg ? targetReg.toUpperCase() : null
       });
-    } catch (err) {
-      console.error("Search Log Exception:", err);
-    }
+    } catch (err) {}
   };
 
   const deductFreeAttempt = async () => {
@@ -322,9 +424,7 @@ export default function DashboardPage() {
     setFreeAttempts(newCount);
     try {
       await supabase.from("user_credits").update({ free_searches_today: 4 - newCount }).ilike("user_reg", currentUser.reg);
-    } catch (e) {
-      console.error("Failed to sync free attempts", e);
-    }
+    } catch (e) {}
     return true;
   };
 
@@ -354,11 +454,7 @@ export default function DashboardPage() {
         if (selectedSection) query = query.eq("section_id", selectedSection.id);
         
         if (selectedDept) {
-          const { data: matchingResults } = await supabase
-            .from("results")
-            .select("student_id")
-            .eq("department_id", selectedDept.id);
-            
+          const { data: matchingResults } = await supabase.from("results").select("student_id").eq("department_id", selectedDept.id);
           const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
           if (studentIds.length === 0) {
             setSearchResults([]);
@@ -372,7 +468,6 @@ export default function DashboardPage() {
 
       query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
       const { data, count, error } = await query;
-      
       if (error) throw error;
 
       setSearchResults((data || []).map((s: any) => ({
@@ -385,7 +480,6 @@ export default function DashboardPage() {
       if (newPage === 0) logSearch(searchQuery, searchMode);
 
     } catch (err) {
-      console.error("Search Failed:", err);
       showToast("Error", "Could not complete search.", "error");
     } finally {
       setIsSearching(false);
@@ -402,15 +496,17 @@ export default function DashboardPage() {
 
     if (!isAdmin) {
       const isOwnResult = targetRegUpper === currentUser.reg.toUpperCase();
-      const cost = isOwnResult ? 100 : 200;
+      const cost = isOwnResult ? 100 : 200; // Translating to credits cost
 
       if (useCredits) {
         if (credits < cost) {
-          showToast("Insufficient Credits", `You need ${cost} credits to view this result.`, "error");
+          showToast("Insufficient Credits", `You need ${cost} credits.`, "error");
           setActiveTab("credits");
           return;
         }
         setCredits(p => p - cost);
+        // Persist deduction
+        await supabase.from("user_credits").update({ credits: credits - cost }).ilike("user_reg", currentUser.reg);
       } else {
         if (!viewedRegsThisSession.includes(targetRegUpper)) {
           const allowed = await deductFreeAttempt();
@@ -422,13 +518,6 @@ export default function DashboardPage() {
 
     setExpandedReg(reg);
     logSearch(searchQuery, "View Result", targetRegUpper);
-
-    if (!useCredits && !isAdmin) {
-      await supabase
-        .from("user_credits")
-        .update({ free_searches_today: 4 - freeAttempts }) // Ensure sync
-        .ilike("user_reg", currentUser.reg);
-    }
 
     try {
       const columns = (isAdmin || useCredits)
@@ -470,7 +559,6 @@ export default function DashboardPage() {
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
-      console.error("Failed to compile marks:", err);
       setStudentDetails([]);
     }
   };
@@ -483,10 +571,9 @@ export default function DashboardPage() {
   ];
 
   const handlePaymentSubmit = async () => {
-    if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Please fill all payment details", "error");
-    if (paymentForm.package === 'custom' && (!paymentForm.amount || isNaN(Number(paymentForm.amount)))) return showToast("Invalid Amount", "Please enter a valid custom amount", "error");
-    if (!currentUser.reg || currentUser.reg === "UNKNOWN") return showToast("Session Error", "Could not verify your registration number. Please login again.", "error");
-
+    if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Fill all details", "error");
+    if (paymentForm.package === 'custom' && (!paymentForm.amount || isNaN(Number(paymentForm.amount)))) return showToast("Invalid Amount", "Enter valid amount", "error");
+    
     const selectedPkg = packages.find(p => p.id === paymentForm.package);
     const finalAmount = paymentForm.package === 'custom' ? Number(paymentForm.amount) : selectedPkg?.amount;
 
@@ -523,10 +610,12 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/80' : 'bg-[#00122a]/80'} px-2 sm:px-4 py-3 flex justify-between items-center`}>
+      {/* HEADER */}
+      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b ${t.border} ${theme === 'light' ? 'bg-white/90' : 'bg-[#00122a]/90'} px-2 sm:px-4 py-3 flex justify-between items-center`}>
         <div className="flex items-center gap-1.5 sm:gap-3">
-          <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
+          <button onClick={() => setSidebarOpen(true)} className={`relative p-1.5 rounded-lg border ${t.border} hover:bg-slate-500/10 transition-colors`}>
             <Menu size={20} className={t.primary} />
+            {hasUnreadMessages && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500"></span>}
           </button>
           
           <div className="flex items-center gap-1 cursor-pointer" onClick={() => setActiveTab('home')}>
@@ -544,7 +633,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-1.5 sm:gap-3">
           
           {isAdmin && (
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-yellow-500 text-black transition-all text-xs font-black shadow-md`}>
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-400 text-[#00122a] transition-all text-xs font-black shadow-md border border-amber-500`}>
               <ShieldAlert size={14} />
               <span>ADMIN MODE</span>
             </div>
@@ -566,7 +655,7 @@ export default function DashboardPage() {
 
               <button 
                 onClick={() => setActiveTab("credits")}
-                className={`flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border ${t.border} ${theme==='light'?'bg-slate-50 hover:bg-slate-100':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold shadow-sm`}
+                className={`flex items-center gap-1 px-2 py-1.5 sm:px-2.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold`}
               >
                 <Wallet size={14} className={t.primary} />
                 <span>{credits.toLocaleString()}</span>
@@ -574,13 +663,14 @@ export default function DashboardPage() {
             </>
           )}
 
-          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500' : 'bg-[#001c4d] text-blue-300'}`}>
+          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500 shadow-sm' : 'bg-[#001c4d] text-blue-300'}`}>
             {theme === "light" ? <Sun size={14} className="sm:w-4 sm:h-4" /> : <Moon size={14} className="sm:w-4 sm:h-4" />}
           </button>
         </div>
       </header>
 
-      <div className={`w-full py-1.5 text-[9px] sm:text-[11px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-3 border-b ${t.border} ${theme === 'light' ? 'bg-slate-100/80 text-slate-500' : 'bg-[#000a1a]/80 text-blue-400/60'}`}>
+      {/* THIN NANO SUB-HEADER */}
+      <div className={`w-full py-1.5 text-[9px] sm:text-[11px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-3 border-b ${t.border} ${theme === 'light' ? 'bg-slate-100/80 text-slate-600' : 'bg-[#000a1a]/80 text-blue-400/60'}`}>
         <span>Check Result Before time</span>
         <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
         <span>Marks</span>
@@ -588,16 +678,17 @@ export default function DashboardPage() {
         <span>Other's Result</span>
       </div>
 
+      {/* SIDEBAR DRAWER */}
       <AnimatePresence>
         {sidebarOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
             <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.3 }}
-              className={`fixed top-0 left-0 h-full w-64 ${t.cardBg} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
+              className={`fixed top-0 left-0 h-full w-64 ${theme==='light' ? 'bg-white' : 'bg-[#00173d]'} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
             >
               <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-yellow-500 text-black' : t.btnPrimary}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isAdmin ? 'bg-amber-400 text-black' : t.btnPrimary}`}>
                     {currentUser.name.charAt(0)}
                   </div>
                   <div className="leading-tight">
@@ -612,6 +703,21 @@ export default function DashboardPage() {
                   <Search size={18} /> Search Portal
                 </button>
                 
+                {isAdmin && (
+                  <>
+                    <button onClick={() => { setActiveTab('approvals'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'approvals' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <CheckCircle2 size={18} /> Approvals
+                    </button>
+                    <button onClick={() => { setActiveTab('leaderboard'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'leaderboard' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <Crown size={18} /> Leaderboards
+                    </button>
+                    <button onClick={() => { setActiveTab('admin_chats'); setSidebarOpen(false); }} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin_chats' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <div className="flex items-center gap-3"><MessageSquare size={18} /> User Chats</div>
+                      {hasUnreadMessages && <span className="w-2 h-2 rounded-full bg-red-500"></span>}
+                    </button>
+                  </>
+                )}
+
                 {!isAdmin && (
                   <>
                     <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
@@ -623,6 +729,10 @@ export default function DashboardPage() {
                     <button onClick={() => { setActiveTab('referral'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'referral' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <Share2 size={18} /> Referral Program
                     </button>
+                    <button onClick={() => { setActiveTab('contact'); setSidebarOpen(false); }} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'contact' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <div className="flex items-center gap-3"><MessageSquare size={18} /> Contact Admin</div>
+                      {hasUnreadMessages && <span className="w-2 h-2 rounded-full bg-red-500"></span>}
+                    </button>
                   </>
                 )}
               </div>
@@ -633,82 +743,215 @@ export default function DashboardPage() {
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-6 py-6 z-10">
         
-        {/* TAB: HOME (SEARCH PORTAL + ADMIN) */}
+        {/* TAB: ADMIN APPROVALS PAGE */}
+        {isAdmin && activeTab === "approvals" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+             <h2 className="text-2xl font-black mb-4 flex items-center gap-2 text-amber-500"><CheckCircle2 /> Manage Approvals</h2>
+             
+             <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                <h3 className="font-bold text-sm mb-3">Pending Payment Approvals</h3>
+                <div className="space-y-2">
+                  {pendingApprovals.length === 0 && <p className="text-xs opacity-50">No pending approvals.</p>}
+                  {pendingApprovals.map((p) => (
+                    <div key={p.id} className={`flex justify-between items-center p-3 border ${t.border} rounded-lg hover:bg-slate-500/5`}>
+                      <div>
+                        <p className="font-bold text-sm">{p.user_reg}</p>
+                        <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
+                      </div>
+                      <button onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)} className="bg-emerald-600 text-white px-4 py-1.5 rounded-md font-bold text-xs">Approve</button>
+                    </div>
+                  ))}
+                </div>
+             </div>
+
+             <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                <h3 className="font-bold text-sm mb-3">Approved History</h3>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {approvedHistory.length === 0 && <p className="text-xs opacity-50">No approved history.</p>}
+                  {approvedHistory.map((p) => (
+                    <div key={p.id} className={`flex justify-between items-center p-3 border ${t.border} rounded-lg hover:bg-slate-500/5`}>
+                      <div>
+                        <p className="font-bold text-sm">{p.user_reg}</p>
+                        <p className="text-[10px] opacity-70 font-mono">Date: {new Date(p.created_at).toLocaleDateString()} | Rs {p.amount}</p>
+                      </div>
+                      <button onClick={() => handleAdminReverse(p.id, p.user_reg, p.amount)} className="bg-red-500/20 text-red-500 border border-red-500/50 px-3 py-1.5 rounded-md font-bold text-xs hover:bg-red-500 hover:text-white transition-colors">Reverse</button>
+                    </div>
+                  ))}
+                </div>
+             </div>
+          </motion.div>
+        )}
+
+        {/* TAB: ADMIN LEADERBOARD PAGE */}
+        {isAdmin && activeTab === "leaderboard" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <h2 className="text-2xl font-black mb-4 flex items-center gap-2 text-amber-500"><Crown /> Leaderboards</h2>
+            <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+              <h3 className="font-bold text-sm mb-3">Top Credit Holders</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className={`bg-slate-500/5 text-opacity-80`}>
+                    <tr>
+                      <th className="px-3 py-2 font-bold rounded-tl-lg">Rank</th>
+                      <th className="px-3 py-2 font-bold">Registration</th>
+                      <th className="px-3 py-2 font-bold text-right rounded-tr-lg">Credits Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-500/10">
+                    {leaderboard.length === 0 && <tr><td colSpan={3} className="text-center py-4 opacity-50">No records found.</td></tr>}
+                    {leaderboard.map((user, i) => (
+                      <tr key={user.user_reg} className={t.rowHover}>
+                        <td className={`px-3 py-2 font-black ${i===0 ? 'text-amber-500' : 'opacity-70'}`}>#{i+1}</td>
+                        <td className="px-3 py-2 font-semibold">{user.user_reg}</td>
+                        <td className="px-3 py-2 text-right font-bold text-emerald-500">{user.credits?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: ADMIN CHATS */}
+        {isAdmin && activeTab === "admin_chats" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex flex-col h-[75vh] ${t.cardBg} border ${t.border} rounded-2xl overflow-hidden`}>
+            {!activeAdminChatUser ? (
+              <div className="p-5 overflow-y-auto">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><MessageSquare/> User Messages</h3>
+                {adminChatList.length === 0 && <p className="text-xs opacity-50">No messages yet.</p>}
+                {adminChatList.map((u) => (
+                  <div key={u.reg} onClick={() => loadAdminSingleChat(u.reg)} className={`flex justify-between items-center p-4 border ${t.border} rounded-xl mb-2 cursor-pointer ${t.rowHover}`}>
+                    <div>
+                      <p className="font-bold">{u.name}</p>
+                      <p className={`text-[10px] font-mono ${t.primary}`}>{u.reg}</p>
+                    </div>
+                    {u.unread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{u.unread} New</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col h-full">
+                <div className={`p-4 border-b ${t.border} flex justify-between items-center bg-slate-500/5`}>
+                  <div>
+                    <span className="font-bold">{activeAdminChatUser}</span>
+                  </div>
+                  <button onClick={() => { setActiveAdminChatUser(null); loadAdminChatList(); }} className="text-xs font-bold underline opacity-70 hover:opacity-100">Back to List</button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-3" ref={chatScrollRef}>
+                  {chatMessages.map((msg) => {
+                    const isMe = msg.sender_reg === currentUser.reg;
+                    return (
+                      <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[75%] p-3 rounded-2xl text-sm ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
+                          {msg.content}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 px-1">
+                          <span className="text-[9px] opacity-50">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                          {isMe && (
+                            <div className="flex items-center gap-1">
+                              {msg.is_read ? <CheckCheck size={12} className="text-blue-400" /> : msg.is_delivered ? <CheckCheck size={12} className="text-gray-400" /> : <Check size={12} className="text-gray-400" />}
+                              <button onClick={() => { setEditingMsgId(msg.id); setChatInput(msg.content); }}><Edit2 size={10} className="opacity-50 hover:opacity-100"/></button>
+                              <button onClick={() => handleDeleteMessage(msg.id)}><Trash2 size={10} className="text-red-400 opacity-50 hover:opacity-100"/></button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                
+                <div className={`p-3 border-t ${t.border} flex items-center gap-2 bg-slate-500/5`}>
+                  <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSendMessage()} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2 text-sm focus:outline-none ${t.inputFocus}`} />
+                  <button onClick={handleSendMessage} disabled={!chatInput.trim()} className={`${t.btnPrimary} p-2.5 rounded-xl disabled:opacity-50`}><Send size={16}/></button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* TAB: CONTACT ADMIN (USER) */}
+        {!isAdmin && activeTab === "contact" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex flex-col h-[75vh] ${t.cardBg} border ${t.border} rounded-2xl overflow-hidden`}>
+            <div className={`p-4 border-b ${t.border} bg-slate-500/5`}>
+              <h3 className="font-bold flex items-center gap-2"><ShieldAlert className="text-amber-500" size={18}/> Contact Support</h3>
+              <p className="text-[10px] opacity-70 mt-1">Sending as: {currentUser.name} ({currentUser.reg}) | {currentUser.phone}</p>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-3" ref={chatScrollRef}>
+              {chatMessages.length === 0 && <div className="text-center py-10 opacity-50 text-xs">Send a message to admin. They usually reply within 24 hours.</div>}
+              {chatMessages.map((msg) => {
+                const isMe = msg.sender_reg === currentUser.reg;
+                return (
+                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[75%] p-3 rounded-2xl text-sm ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
+                      {msg.content}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 px-1">
+                      <span className="text-[9px] opacity-50">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      {isMe && (
+                        <div className="flex items-center gap-1">
+                          {msg.is_read ? <CheckCheck size={12} className="text-blue-400" /> : msg.is_delivered ? <CheckCheck size={12} className="text-gray-400" /> : <Check size={12} className="text-gray-400" />}
+                          <button onClick={() => { setEditingMsgId(msg.id); setChatInput(msg.content); }}><Edit2 size={10} className="opacity-50 hover:opacity-100"/></button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            <div className={`p-3 border-t ${t.border} flex items-center gap-2 bg-slate-500/5`}>
+              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSendMessage()} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2 text-sm focus:outline-none ${t.inputFocus}`} />
+              <button onClick={handleSendMessage} disabled={!chatInput.trim()} className={`${t.btnPrimary} p-2.5 rounded-xl disabled:opacity-50`}><Send size={16}/></button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: HOME (SEARCH PORTAL) */}
         {activeTab === "home" && (
           <>
-            {/* ADMIN INJECTED COMMAND CENTER */}
             {isAdmin && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 space-y-6">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
-                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CreditCard size={12}/> Sales</div>
-                    <div className="text-xl font-black">{adminStats.sales}</div>
-                  </div>
-                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg} relative`}>
-                    {pendingApprovals.length > 0 && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
-                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CheckCircle2 size={12}/> Pending Approvals</div>
-                    <div className="text-xl font-black">{pendingApprovals.length}</div>
-                  </div>
-                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
-                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><UsersRound size={12}/> Total Users</div>
-                    <div className="text-xl font-black">{adminStats.totalUsers}</div>
-                  </div>
-                  <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
-                    <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><DollarSign size={12}/> Profit Earned</div>
-                    <div className="text-xl font-black text-emerald-500">Rs {adminStats.profit.toLocaleString()}</div>
-                  </div>
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                  <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CreditCard size={12}/> Sales</div>
+                  <div className="text-xl font-black">{adminStats.sales}</div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Pending Approvals */}
-                  <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
-                    <h3 className="font-bold text-sm mb-3">Pending Payment Approvals</h3>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {pendingApprovals.length === 0 && <p className="text-xs opacity-50">No pending approvals.</p>}
-                      {pendingApprovals.map((p) => (
-                        <div key={p.id} className="flex justify-between items-center p-3 border border-slate-500/20 rounded-lg hover:bg-slate-500/5">
-                          <div>
-                            <p className="font-bold text-sm">{p.user_reg}</p>
-                            <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
-                          </div>
-                          <button 
-                            onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-md font-bold text-xs transition-colors"
-                          >
-                            Approve
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Leaderboard */}
-                  <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
-                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><Crown size={16} className="text-amber-500"/> Referral / Credits Leaderboard</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs whitespace-nowrap">
-                        <thead className={`bg-slate-500/5 text-opacity-80`}>
-                          <tr>
-                            <th className="px-3 py-2 font-bold rounded-tl-lg">Rank</th>
-                            <th className="px-3 py-2 font-bold">Registration</th>
-                            <th className="px-3 py-2 font-bold text-right rounded-tr-lg">Credits Balance</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-500/10">
-                          {leaderboard.length === 0 && <tr><td colSpan={3} className="text-center py-4 opacity-50">No records found.</td></tr>}
-                          {leaderboard.map((user, i) => (
-                            <tr key={user.user_reg} className="hover:bg-slate-500/5">
-                              <td className={`px-3 py-2 font-black ${i===0 ? 'text-amber-500' : 'opacity-70'}`}>#{i+1}</td>
-                              <td className="px-3 py-2 font-semibold">{user.user_reg}</td>
-                              <td className="px-3 py-2 text-right font-bold text-emerald-500">{user.credits?.toLocaleString()}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg} relative`}>
+                  {pendingApprovals.length > 0 && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
+                  <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><CheckCircle2 size={12}/> Pending</div>
+                  <div className="text-xl font-black">{pendingApprovals.length}</div>
+                </div>
+                <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                  <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><UsersRound size={12}/> Total Users</div>
+                  <div className="text-xl font-black">{adminStats.totalUsers}</div>
+                </div>
+                <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                  <div className="text-[10px] font-bold opacity-70 mb-1 flex items-center gap-1.5"><DollarSign size={12}/> Profit Earned</div>
+                  <div className="text-xl font-black text-emerald-500">Rs {adminStats.profit.toLocaleString()}</div>
                 </div>
               </motion.div>
+            )}
+
+            {isAdmin && pendingApprovals.length > 0 && (
+              <div className={`mb-6 ${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-bold text-sm">Recent Pending Approvals</h3>
+                  <button onClick={() => setActiveTab('approvals')} className="text-xs font-bold underline opacity-70 hover:opacity-100">View All</button>
+                </div>
+                <div className="space-y-2">
+                  {pendingApprovals.slice(0,3).map((p) => (
+                    <div key={p.id} className={`flex justify-between items-center p-3 border ${t.border} rounded-lg hover:bg-slate-500/5`}>
+                      <div>
+                        <p className="font-bold text-sm">{p.user_reg}</p>
+                        <p className="text-[10px] opacity-70 font-mono">TID: {p.tid_number} | Rs {p.amount}</p>
+                      </div>
+                      <button onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)} className="bg-emerald-600 text-white px-4 py-1.5 rounded-md font-bold text-xs">Approve</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             <div className={`relative overflow-hidden rounded-[1.5rem] p-5 sm:p-6 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
@@ -721,7 +964,6 @@ export default function DashboardPage() {
                   <div>
                     <h2 className="text-xl sm:text-3xl font-black mb-1">Welcome back, {formatFirstName(currentUser.name)}!</h2>
                   </div>
-                  
                   <div className="flex flex-col items-end gap-2">
                     <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${theme==='light' ? 'bg-white/20 border-white/30' : 'bg-[#00205b]/50 border-blue-400/20'} text-[9px] font-bold tracking-widest uppercase shadow-sm`}>
                       <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: "0 0 8px 1px #4ade80" }}></div>
@@ -730,7 +972,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 mb-2">
+                <div className="flex flex-wrap items-center gap-2 mb-2 mt-4">
                   {!isAdmin && (
                     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${theme==='light' ? 'bg-white/10 border-white/20' : 'bg-[#00205b]/40 border-blue-400/20'} text-[10px] sm:text-xs font-bold`}>
                       <Activity size={12} className="opacity-70"/> Free Attempts: <span className={theme==='light' ? 'text-white font-black' : 'text-amber-400 font-black'}>{freeAttempts}/4</span>
@@ -742,29 +984,26 @@ export default function DashboardPage() {
                     </button>
                   )}
                 </div>
-                
-                {(freeAttempts <= 0) && !useCredits && !isAdmin && (
-                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                    className="mt-2 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium flex flex-wrap items-center gap-2 max-w-fit"
-                  >
-                    <Lock size={14}/> <span>Free attempts ended. Turn on <b>Use Credits</b> or check tomorrow.</span>
-                    <button onClick={() => setActiveTab('credits')} className="ml-2 underline decoration-amber-500/50 hover:text-white transition-colors">Buy Credits</button>
-                  </motion.div>
-                )}
               </div>
             </div>
 
-            <div className={`${t.cardBg} border ${t.border} p-4 sm:p-5 rounded-[1.25rem] shadow-sm mb-6 transition-all`}>
-              <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-3 mb-1">
-                  <div className="relative">
-                    <select value={searchMode} onChange={(e) => { setSearchMode(e.target.value as SearchMode); setSearchQuery(""); setSearchResults(null); }}
-                      className={`appearance-none ${t.inputBg} border ${t.border} ${t.primary} rounded-lg px-3 py-1.5 focus:outline-none ${t.inputFocus} text-xs font-bold cursor-pointer pr-8`}
-                    >
-                      <option value="Roll Number">By Reg No</option>
-                      <option value="Name">By Name</option>
-                    </select>
-                    <ChevronDown className={`absolute right-2.5 top-2 pointer-events-none ${t.primary}`} size={12} />
+            <div className={`${t.cardBg} border ${t.border} p-4 sm:p-5 rounded-[1.25rem] mb-6 transition-all`}>
+              <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-4">
+                
+                {/* SEARCH TOGGLE UI */}
+                <div className="flex flex-col items-center mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 mb-2">Search By</span>
+                  <div className={`flex p-1 rounded-xl w-full max-w-[240px] relative ${theme==='light'?'bg-slate-100':'bg-[#00122a]'}`}>
+                    <div 
+                      className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg transition-all duration-300 ease-out ${t.btnPrimary}`}
+                      style={{ left: searchMode === 'Roll Number' ? '4px' : 'calc(50%)' }}
+                    />
+                    <button type="button" onClick={() => {setSearchMode('Roll Number'); setSearchQuery(""); setSearchResults(null);}} className={`flex-1 py-2 text-xs font-bold z-10 transition-colors ${searchMode === 'Roll Number' ? (theme==='light'?'text-white':'text-black') : 'opacity-70'}`}>
+                      Reg Number
+                    </button>
+                    <button type="button" onClick={() => {setSearchMode('Name'); setSearchQuery(""); setSearchResults(null);}} className={`flex-1 py-2 text-xs font-bold z-10 transition-colors ${searchMode === 'Name' ? (theme==='light'?'text-white':'text-black') : 'opacity-70'}`}>
+                      Name
+                    </button>
                   </div>
                 </div>
 
@@ -817,10 +1056,10 @@ export default function DashboardPage() {
                   <div className="flex-1 relative">
                     <Search className={`absolute left-3 top-2.5 ${t.textMuted}`} size={16} />
                     <input type="text" placeholder={searchMode === 'Roll Number' ? "e.g. F20BSCS1M010" : "e.g. Ali"} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 pl-9 pr-3 focus:outline-none ${t.inputFocus} text-sm shadow-sm`}
+                      className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 pl-9 pr-3 focus:outline-none ${t.inputFocus} text-sm`}
                     />
                   </div>
-                  <button type="submit" disabled={isSearching || !searchQuery.trim()} className={`${t.btnPrimary} font-bold rounded-xl px-6 py-2.5 flex items-center justify-center gap-2 text-sm disabled:opacity-70 disabled:cursor-not-allowed`}>
+                  <button type="submit" disabled={isSearching || !searchQuery.trim()} className={`${t.btnPrimary} font-bold rounded-xl px-8 py-2.5 flex items-center justify-center gap-2 text-sm disabled:opacity-70 disabled:cursor-not-allowed`}>
                     {isSearching ? <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "Search"}
                   </button>
                 </div>
@@ -836,12 +1075,12 @@ export default function DashboardPage() {
             <div className="space-y-3">
               <AnimatePresence>
                 {searchResults?.map((student, idx) => (
-                  <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={idx} className={`${t.cardBg} border ${t.border} rounded-2xl shadow-sm overflow-hidden`}>
+                  <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={idx} className={`${t.cardBg} border ${t.border} rounded-2xl overflow-hidden`}>
                     <div className="p-3 sm:p-4 flex justify-between items-center gap-2 cursor-pointer hover:bg-slate-500/5 transition-colors" onClick={() => handleExpandResult(student.reg, student.id)}>
                       <div>
                         <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-100 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>{student.reg}</span>
                           <h3 className="text-sm sm:text-base font-bold">{student.name}</h3>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-[#00122a] border-[#00348c]'}`}>{student.reg}</span>
                         </div>
                         <div className={`text-[10px] ${t.textMuted}`}>{student.session} • {student.section}</div>
                       </div>
@@ -867,7 +1106,7 @@ export default function DashboardPage() {
                                 )}
 
                                 {studentDetails.map((sem: any, sIdx: number) => (
-                                  <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${theme === 'light' ? 'bg-white' : 'bg-[#001c4d]'} overflow-hidden shadow-sm`}>
+                                  <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${t.cardBg} overflow-hidden`}>
                                     <div className={`px-3 py-2 text-xs font-black uppercase tracking-wider ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
                                       Semester {sem.semNum}
                                     </div>
@@ -942,7 +1181,7 @@ export default function DashboardPage() {
                     {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg">Popular</div>}
                     <div className="text-xs font-bold opacity-70 mb-1">{pkg.label}</div>
                     <div className="text-base sm:text-lg font-black mb-2">{pkg.price}</div>
-                    <div className={`inline-block text-[10px] sm:text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits}</div>
+                    <div className={`inline-block text-[10px] sm:text-xs font-black px-2 py-1 rounded bg-amber-500 text-black`}>{pkg.credits} Credits</div>
                   </div>
                 ))}
               </div>
@@ -971,7 +1210,7 @@ export default function DashboardPage() {
                     <input type="text" placeholder="TID Number of Receipt" value={paymentForm.tid} onChange={(e) => setPaymentForm({...paymentForm, tid: e.target.value})}
                       className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 text-sm focus:outline-none ${t.inputFocus}`} />
                   </div>
-                  <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-sm`}>
+                  <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all text-sm`}>
                     <CheckCircle2 size={16}/> Submit Payment Verification
                   </button>
                 </motion.div>
@@ -1008,14 +1247,17 @@ export default function DashboardPage() {
                          </td>
                        </tr>
                      ))}
-                     {historyLogs.usage.filter(u => u.search_type === 'View Result').map((usg, i) => (
-                       <tr key={`usg-${i}`} className="hover:bg-slate-500/5">
-                         <td className="px-4 py-3 font-mono opacity-70">{new Date(usg.created_at).toLocaleDateString()}</td>
-                         <td className="px-4 py-3 font-semibold text-red-400">Usage</td>
-                         <td className="px-4 py-3 opacity-80">Unlocked Reg: {usg.viewed_target_reg}</td>
-                         <td className="px-4 py-3 text-right font-bold opacity-70">-</td>
-                       </tr>
-                     ))}
+                     {historyLogs.usage.filter(u => u.search_type === 'View Result').map((usg, i) => {
+                       const cost = usg.viewed_target_reg === currentUser.reg ? "- 100 Credits" : "- 200 Credits";
+                       return (
+                         <tr key={`usg-${i}`} className="hover:bg-slate-500/5">
+                           <td className="px-4 py-3 font-mono opacity-70">{new Date(usg.created_at).toLocaleDateString()}</td>
+                           <td className="px-4 py-3 font-semibold text-red-400">Usage</td>
+                           <td className="px-4 py-3 opacity-80">Unlocked Reg: {usg.viewed_target_reg}</td>
+                           <td className="px-4 py-3 text-right font-bold text-red-400">{cost}</td>
+                         </tr>
+                       );
+                     })}
                    </tbody>
                  </table>
                </div>
@@ -1040,8 +1282,8 @@ export default function DashboardPage() {
             <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
             <p className="text-sm opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up and buy credits, you get 20% of their purchase value added instantly to your wallet!</p>
             <div className={`max-w-sm mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono text-xs sm:text-sm flex justify-between items-center pl-4`}>
-              <span className="truncate opacity-80">iubresults.com/ref/{currentUser.reg}</span>
-              <button onClick={() => showToast("Copied!", "Referral link copied to clipboard", "info")} className={`${t.btnPrimary} px-4 py-2 rounded-lg font-bold shadow-md`}>Copy</button>
+              <span className="truncate opacity-80">https://iubbackend.vercel.app/ref/{currentUser.reg}</span>
+              <button onClick={() => { navigator.clipboard.writeText(`https://iubbackend.vercel.app/ref/${currentUser.reg}`); showToast("Copied!", "Referral link copied to clipboard", "info"); }} className={`${t.btnPrimary} px-4 py-2 rounded-lg font-bold shadow-md`}>Copy</button>
             </div>
           </div>
         )}
