@@ -546,10 +546,20 @@ export default function DashboardPage() {
       // 2. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
       
-      // 3. Group by explicitly mapped semester values cleanly
+      // 3. Group by semester with a robust fallback
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
-        // Look at semester string first, then semester_num, then fall back safely
-        const sem = rec.semester || (rec.semester_num !== null && rec.semester_num !== undefined ? `Semester ${rec.semester_num}` : "General");
+        // Fallback chain: rec.semester -> rec.semester_num -> check if student has a session/section listed
+        let sem = "General Data";
+        
+        if (rec.semester) {
+          sem = rec.semester;
+        } else if (rec.semester_num !== null && rec.semester_num !== undefined) {
+          sem = `Semester ${rec.semester_num}`;
+        } else if (studentDetails && studentDetails.length > 0) {
+          // Fallback to the session string (like FALL 2017) if semester is completely empty
+          sem = searchResults?.find(s => s.id === studentId)?.session || "General";
+        }
+        
         if (!acc[sem]) acc[sem] = [];
         
         acc[sem].push({
