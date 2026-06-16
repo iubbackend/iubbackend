@@ -524,7 +524,7 @@ export default function DashboardPage() {
         ? "id, semester, semester_num, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours)"
         : "id, semester, semester_num, mid_term_marks, subject_id (course_code, course_name)";
 
-      const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId);
+      const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId); // ✅ Matches the integer ID from the students table
       if (error) throw error;
 
       if (!records || records.length === 0) {
