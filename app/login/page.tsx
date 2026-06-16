@@ -161,12 +161,34 @@ export default function LoginPage() {
 
       const { error } = await supabase
         .from('users')
-        .insert([{ reg: rollNumber, phone, email, pass: hashedPassword }]); // Insert the hash, not plain text
+        .insert([{ reg: rollNumber.toUpperCase(), phone, email, pass: hashedPassword }]); // Forced uppercase for strict DB matching
 
       if (error) {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
         else setErrorMsg('Error creating account. Please try again.');
       } else {
+        // --- REFERRAL pipeline integration ---
+        try {
+          const savedReferral = typeof window !== "undefined" ? localStorage.getItem("referred_by") : null;
+          
+          await supabase
+            .from('user_credits')
+            .insert([{ 
+              user_reg: rollNumber.toUpperCase(), 
+              credits: 0, 
+              free_searches_today: 0,
+              referred_by: savedReferral ? savedReferral.toUpperCase() : null
+            }]);
+
+          // Clear the storage token so it doesn't fire on secondary signups
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("referred_by");
+          }
+        } catch (creditErr) {
+          console.error("Failed to initialize user wallet/referral:", creditErr);
+          // Non-blocking catch so the user doesn't get stuck if wallet row creation has an isolated issue
+        }
+
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
         setTimeout(() => switchView('login'), 3000);
       }
