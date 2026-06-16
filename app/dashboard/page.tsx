@@ -510,7 +510,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleExpandResult = async (reg: string, studentId: number) => {
+ const handleExpandResult = async (reg: string, studentId: number) => {
     if (expandedReg === reg) {
       setExpandedReg(null);
       return;
@@ -530,10 +530,19 @@ export default function DashboardPage() {
         return;
       }
 
-      // 1. Deduplicate subjects: keep only the record with the highest total_marks
+      // 1. DYNAMIC FIX: Extract semester directly from the student's section name string
+      const studentCard = searchResults?.find(s => s.id === studentId);
+      const rawSection = studentCard?.section || "General Data"; // e.g., "BSACCF-8TH-1M"
+      
+      // Use regex to find the number before "TH", "RD", "ND", "ST" in the section name
+      const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
+      const calculatedSemester = semMatch ? `Semester ${semMatch[1]}` : "General Data";
+
+      // 2. Deduplicate subjects: keep only the record with the highest total_marks
       const uniqueCourses = new Map();
       records.forEach((rec: any) => {
-        const sem = rec.semester_num || rec.semester || "General";
+        // Use DB semester if it somehow exists, otherwise force our calculated one
+        const sem = rec.semester || calculatedSemester;
         const courseCode = rec.subject_id?.course_code || "N/A";
         const key = `${sem}-${courseCode}`;
         const currentTotal = Number(rec.total_marks) || 0;
@@ -543,22 +552,12 @@ export default function DashboardPage() {
         }
       });
 
-      // 2. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
+      // 3. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
-      
-      // 3. Group by semester with a robust fallback
+
+      // 4. Group the subjects under the correct semester banner
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
-        // Fallback chain: rec.semester -> rec.semester_num -> check if student has a session/section listed
-        let sem = "General Data";
-        
-        if (rec.semester) {
-          sem = rec.semester;
-        } else if (rec.semester_num !== null && rec.semester_num !== undefined) {
-          sem = `Semester ${rec.semester_num}`;
-        } else if (studentDetails && studentDetails.length > 0) {
-          // Fallback to the session string (like FALL 2017) if semester is completely empty
-          sem = searchResults?.find(s => s.id === studentId)?.session || "General";
-        }
+        const sem = rec.semester || calculatedSemester;
         
         if (!acc[sem]) acc[sem] = [];
         
@@ -575,13 +574,13 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      // 4. Sort semesters ascending (1, 2, 3...)
+      // 5. Sort semesters descending (latest first) and strip the "Semester " text for the UI
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
-        const numA = parseInt(a) || 0;
-        const numB = parseInt(b) || 0;
-        return numB - numA; // Descending (latest first)
+        const numA = parseInt(a.replace(/\D/g, '')) || 0;
+        const numB = parseInt(b.replace(/\D/g, '')) || 0;
+        return numB - numA; 
       }).map(sem => ({
-        semNum: sem,
+        semNum: sem.replace("Semester ", ""), 
         courses: grouped[sem]
       }));
 
