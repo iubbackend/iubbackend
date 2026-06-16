@@ -545,11 +545,11 @@ export default function DashboardPage() {
 
       // 2. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
-
-      // 3. Group by explicitly mapped semester numbers
+      
+      // 3. Group by explicitly mapped semester values cleanly
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
-        // Extract exact integer semester for clean sorting
-        const sem = rec.semester_num || parseInt(rec.semester?.replace(/\D/g, '')) || "General";
+        // Look at semester string first, then semester_num, then fall back safely
+        const sem = rec.semester || (rec.semester_num !== null && rec.semester_num !== undefined ? `Semester ${rec.semester_num}` : "General");
         if (!acc[sem]) acc[sem] = [];
         
         acc[sem].push({
