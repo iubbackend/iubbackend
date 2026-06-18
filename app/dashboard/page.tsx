@@ -20,6 +20,34 @@ const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 const ADMIN_REG = "S25BARIN1M01118";
 const SEARCH_COST = 1500; 
 
+// --- CALCULATION HELPERS ---
+const getCreditHours = (code: string, totalMarks: number) => {
+  const codeUpper = String(code).toUpperCase().replace(/[\s-]/g, "");
+  const manualFixes: Record<string, number> = {
+    "ISL101": 2.0, "ISLAMICSTUDIES": 2.0, "CS101": 4.0, "CS102": 4.0, "PAK101": 2.0, "HQ101": 1.0, "HQ001": 1.0
+  };
+  if (manualFixes[codeUpper]) return manualFixes[codeUpper];
+
+  const tm = Math.round(Number(totalMarks) || 0);
+  if (tm >= 15 && tm <= 55) return 1.0;
+  if (tm >= 56 && tm <= 80) return 2.0;
+  return 3.0; // Default
+};
+
+const getGradePoint = (marks: number) => {
+  const m = Math.round(Number(marks) || 0);
+  if (m >= 85) return 4.0;
+  if (m < 50) return 0.0;
+  const gradingMap: Record<number, number> = {
+    50: 1.0, 51: 1.1, 52: 1.2, 53: 1.3, 54: 1.4, 55: 1.5, 56: 1.6, 57: 1.7, 58: 1.8, 59: 1.9,
+    60: 2.0, 61: 2.1, 62: 2.2, 63: 2.3, 64: 2.4, 65: 2.5, 66: 2.6, 67: 2.7, 68: 2.8, 69: 2.9,
+    70: 3.0, 71: 3.1, 72: 3.1, 73: 3.2, 74: 3.3, 75: 3.3, 76: 3.4, 77: 3.5, 78: 3.5, 79: 3.6,
+    80: 3.7, 81: 3.7, 82: 3.8, 83: 3.9, 84: 3.9
+  };
+  return gradingMap[m] || 0.0;
+};
+// ---------------------------
+
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
 type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats";
@@ -489,15 +517,21 @@ export default function DashboardPage() {
       
       const { data, count } = await res.json();
 
-      setSearchResults((data || []).map((s: any, idx: number) => ({
+      const mappedData = (data || []).map((s: any, idx: number) => ({
         id: s.id || idx, 
         reg: s.reg, 
         name: s.name,
         session: s.session || s.academic_sessions?.session_code || "N/A",
         section: s.section || s.sections?.section_name || "N/A"
-      })));
-      
+      }));
+
+      setSearchResults(mappedData);
       setTotalRecords(count || 0);
+
+      // Auto-expand immediately if it's an exact Roll Number search yielding 1 result
+      if (activeMode === "Roll Number" && mappedData.length === 1 && newPage === 0) {
+        setTimeout(() => handleExpandResult(mappedData[0].reg, mappedData[0].id || 0), 50);
+      }
 
     } catch (err) {
       showToast("Error", "Could not complete search.", "error");
@@ -565,15 +599,38 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      // 5. Sort semesters descending
+      // 5. Sort semesters descending and Calculate SGPA & Totals
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
         const numA = parseInt(a.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.replace(/\D/g, '')) || 0;
         return numB - numA; 
-      }).map(sem => ({
-        semNum: sem.replace("Semester ", ""), 
-        courses: grouped[sem]
-      }));
+      }).map(sem => {
+        const courses = grouped[sem];
+        let totalObtained = 0;
+        let totalCh = 0;
+        let totalGp = 0;
+
+        courses.forEach((c: any) => {
+          if (c.tot != null) {
+            totalObtained += c.tot;
+            const ch = getCreditHours(c.code, c.tot);
+            const gp = getGradePoint(c.tot);
+            if (ch > 0) {
+              totalCh += ch;
+              totalGp += (gp * ch);
+            }
+          }
+        });
+
+        const sgpa = totalCh > 0 ? (totalGp / totalCh).toFixed(2) : "0.00";
+
+        return {
+          semNum: sem.replace("Semester ", ""), 
+          courses,
+          totalObtained,
+          sgpa
+        };
+      });
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
@@ -1176,6 +1233,24 @@ export default function DashboardPage() {
                                         </tbody>
                                       </table>
                                     </div>
+
+                                    {/* ADDED: Semester Summary Footer */}
+                                    <div className={`flex justify-around items-center p-3 border-t ${t.border} bg-slate-500/5`}>
+                                      <div className="text-center">
+                                        <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-0.5">Obtained Marks</div>
+                                        <div className={`text-lg font-black ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
+                                          {(isAdmin || useCredits) ? sem.totalObtained : <Lock size={14} className="mx-auto" />}
+                                        </div>
+                                      </div>
+                                      <div className="w-px h-8 bg-slate-500/20"></div>
+                                      <div className="text-center">
+                                        <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-0.5">SGPA</div>
+                                        <div className={`text-lg font-black ${(isAdmin || useCredits) ? t.primary : 'opacity-50 blur-sm'}`}>
+                                          {(isAdmin || useCredits) ? sem.sgpa : <Lock size={14} className="mx-auto" />}
+                                        </div>
+                                      </div>
+                                    </div>
+
                                   </div>
                                 ))}
                               </>
