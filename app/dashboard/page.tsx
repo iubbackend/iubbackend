@@ -1277,4 +1277,61 @@ export default function DashboardPage() {
                      ))}
                      {historyLogs.usage.map((usg, i) => (
                        <tr key={`usg-${i}`} className={t.rowHover}>
-                         <td className="px-4 py-3 font-mono opacity-70 text
+                         <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(usg.created_at).toLocaleDateString()}</td>
+                         <td className="px-4 py-3 font-semibold text-red-400 flex items-center gap-1.5"><Search size={12}/> Paid Search</td>
+                         <td className="px-4 py-3 opacity-80">Searched: {usg.search_query}</td>
+                         <td className="px-4 py-3 text-right font-bold text-red-400">- {SEARCH_COST} Credits</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* TAB: SEARCH HISTORY (ONLY SHOWN TO NORMAL USERS) */}
+        {!isAdmin && activeTab === "history" && (
+          <div className="space-y-5">
+            <h3 className="font-bold text-xl mb-4 flex items-center gap-2.5"><History className={t.primary} size={24}/> Paid Search History</h3>
+            <p className="opacity-70 mb-5 max-w-2xl">A complete record of your executed paid searches. Clicking 'See Result' will automatically re-run the search in the portal.</p>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {paidSearchHistory.length === 0 && (
+                 <div className={`col-span-full p-8 text-center rounded-2xl border ${t.border} ${t.cardBg} opacity-60`}>
+                    No paid searches executed yet.
+                 </div>
+              )}
+              {paidSearchHistory.map((log) => (
+                <div key={log.id} className={`${t.cardBg} border ${t.border} p-4 rounded-2xl shadow-sm flex flex-col justify-between`}>
+                  <div className="mb-3 border-l-4 border-amber-500 pl-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1">{new Date(log.created_at).toLocaleDateString()}</p>
+                    <p className="font-bold text-base leading-tight">{log.search_query}</p>
+                  </div>
+                  <button onClick={() => executeReSearch(log.search_query)} className={`w-full py-2 rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-black font-bold transition-colors`}>
+                    See Result
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: REFERRAL (ONLY SHOWN TO NORMAL USERS) */}
+        {!isAdmin && activeTab === "referral" && (
+          <div className={`${t.cardBg} border ${t.border} p-8 rounded-[1.5rem] text-center shadow-md`}>
+            <div className={`w-16 h-16 rounded-2xl mx-auto mb-5 flex items-center justify-center bg-gradient-to-br from-[#0056b3] to-[#00348c] shadow-lg text-white`}>
+              <Share2 size={30} />
+            </div>
+            <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
+            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up and buy credits, you instantly get a 20% bonus of their purchase added to your wallet!</p>
+            <div className={`max-w-md mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono flex justify-between items-center pl-4 shadow-inner`}>
+              <span className="truncate opacity-80 font-semibold text-[12px]">https://iubbackend.vercel.app/ref/{currentUser.reg}</span>
+              <button onClick={() => { navigator.clipboard.writeText(`https://iubbackend.vercel.app/ref/${currentUser.reg}`); showToast("Copied!", "Referral link copied to clipboard", "info"); }} className={`${t.btnPrimary} px-5 py-2 rounded-lg font-bold shadow-md active:scale-95 transition-transform`}>Copy</button>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
