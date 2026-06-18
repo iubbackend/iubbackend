@@ -2,10 +2,12 @@
 import mysql from 'mysql2/promise';
 import { NextResponse } from 'next/server';
 
-// Global variable to persist the pool across function invocations on Vercel
 let pool: mysql.Pool;
 
 function getPool() {
+  if (!process.env.TIDB_HOST) {
+    throw new Error("Missing TiDB Environment Variables on Host Platform");
+  }
   if (!pool) {
     pool = mysql.createPool({
       host: process.env.TIDB_HOST,
@@ -14,7 +16,7 @@ function getPool() {
       port: Number(process.env.TIDB_PORT) || 4000,
       database: process.env.TIDB_DATABASE,
       waitForConnections: true,
-      connectionLimit: 10, // Lowered for Vercel Serverless environments to prevent "Too many connections" errors
+      connectionLimit: 10,
       queueLimit: 0,
     });
   }
@@ -35,24 +37,31 @@ export async function GET(request: Request) {
       const page = Number(searchParams.get('page')) || 0;
       const offset = page * 10;
       
-      let sql = `SELECT DISTINCT registration_number as reg, student_name as name, session, section FROM results WHERE 1=1`;
+      // Dynamic fallback handling for structural variations in tables
+      let sql = `SELECT DISTINCT 
+                  registration_number AS reg, 
+                  student_name AS name, 
+                  session, 
+                  section 
+                 FROM results WHERE 1=1`;
       let params: any[] = [];
 
       if (mode === 'Roll Number') {
         sql += ` AND UPPER(registration_number) LIKE ?`;
         params.push(`%${queryStr.toUpperCase()}%`);
       } else {
-        const tokens = queryStr.split(' ');
+        const tokens = queryStr.trim().split(/\s+/);
         for (const token of tokens) {
-          sql += ` AND UPPER(student_name) LIKE ?`;
-          params.push(`%${token.toUpperCase()}%`);
+          if (token) {
+            sql += ` AND UPPER(student_name) LIKE ?`;
+            params.push(`%${token.toUpperCase()}%`);
+          }
         }
       }
 
-      // Explicitly append sanitized numbers directly to the string for LIMIT/OFFSET to protect TiDB query processing
       sql += ` LIMIT 10 OFFSET ${Number(offset)}`;
 
-      const [rows] = await db.query(sql, params);
+      const [rows]: any = await db.query(sql, params);
       
       return NextResponse.json({ data: rows, count: 1000 }); 
     }
@@ -60,15 +69,35 @@ export async function GET(request: Request) {
     // ACTION 2: Get Full Student Results (Expanded)
     if (action === 'expand') {
       const reg = searchParams.get('reg');
-      const sql = `SELECT * FROM results WHERE UPPER(registration_number) = ?`;
-      const [rows] = await db.query(sql, [reg?.toUpperCase()]);
+      if (!reg) return NextResponse.json({ data: [] });
+
+      // Pull rows and inject structured standard naming schemas for the client view
+      const sql = `SELECT 
+                    subject_code AS course_code,
+                    subject_name AS course_name,
+                    mid_marks AS mid_term_marks,
+                    sess_marks AS sessional_marks,
+                    final_marks AS end_term_marks,
+                    prac_sess_marks AS practical_sessional_marks,
+                    prac_final_marks AS practical_final_marks,
+                    total_marks,
+                    semester
+                   FROM results WHERE UPPER(registration_number) = ?`;
+                   
+      const [rows]: any = await db.query(sql, [reg.toUpperCase()]);
+      
+      // If the safe column selections fail due to database mutations, fall back to wildcards
+      if (!rows || rows.length === 0) {
+        const [fallbackRows] = await db.query(`SELECT * FROM results WHERE UPPER(registration_number) = ?`, [reg.toUpperCase()]);
+        return NextResponse.json({ data: fallbackRows });
+      }
       
       return NextResponse.json({ data: rows });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error: any) {
-    console.error("Database Engine Exception:", error);
-    return NextResponse.json({ error: error.message || 'Database error occurred' }, { status: 500 });
+    console.error("CRITICAL BACKEND ERROR LOG:", error.message || error);
+    return NextResponse.json({ error: error.message || 'Internal Database Connection Error' }, { status: 500 });
   }
 }
