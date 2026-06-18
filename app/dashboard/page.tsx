@@ -469,7 +469,7 @@ export default function DashboardPage() {
     setPage(newPage);
 
     try {
-      // 🔗 Replaced Supabase fetch with our TiDB API Route
+      // 🔗 Updated to use TiDB API Route
       const params = new URLSearchParams({
         action: 'search',
         mode: activeMode,
@@ -477,17 +477,24 @@ export default function DashboardPage() {
         page: newPage.toString()
       });
 
+      // Pass along any filters if searching by Name
+      if (activeMode === "Name") {
+        if (selectedSession) params.append('session_id', selectedSession.id.toString());
+        if (selectedDept) params.append('department_id', selectedDept.id.toString());
+        if (selectedSection) params.append('section_id', selectedSection.id.toString());
+      }
+
       const res = await fetch(`/api/results?${params}`);
       if (!res.ok) throw new Error("Failed to fetch results from database");
       
       const { data, count } = await res.json();
 
       setSearchResults((data || []).map((s: any, idx: number) => ({
-        id: idx, // TiDB might not provide a unique sequential ID here, falling back to index mapping
+        id: s.id || idx, 
         reg: s.reg, 
         name: s.name,
-        session: s.session || "N/A",
-        section: s.section || "N/A"
+        session: s.session || s.academic_sessions?.session_code || "N/A",
+        section: s.section || s.sections?.section_name || "N/A"
       })));
       
       setTotalRecords(count || 0);
@@ -507,7 +514,7 @@ export default function DashboardPage() {
     setExpandedReg(reg);
 
     try {
-      // 🔗 Replaced Supabase expand fetch with our TiDB API Route
+      // 🔗 Updated to use TiDB API Route for expand
       const res = await fetch(`/api/results?action=expand&reg=${encodeURIComponent(reg)}`);
       if (!res.ok) throw new Error("Failed to load details");
       const { data: records } = await res.json();
@@ -518,7 +525,7 @@ export default function DashboardPage() {
       }
 
       // 1. DYNAMIC FIX: Extract semester directly from the student's section name string
-      const studentCard = searchResults?.find(s => s.reg === reg);
+      const studentCard = searchResults?.find(s => s.reg === reg || s.id === studentId);
       const rawSection = studentCard?.section || "General Data"; 
       
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
@@ -528,7 +535,7 @@ export default function DashboardPage() {
       const uniqueCourses = new Map();
       records.forEach((rec: any) => {
         const sem = rec.semester || calculatedSemester;
-        const courseCode = rec.course_code || "N/A";
+        const courseCode = rec.course_code || rec.subject_id?.course_code || "N/A";
         const key = `${sem}-${courseCode}`;
         const currentTotal = Number(rec.total_marks) || 0;
 
@@ -546,8 +553,8 @@ export default function DashboardPage() {
         if (!acc[sem]) acc[sem] = [];
         
         acc[sem].push({
-          code: rec.course_code || "N/A",
-          name: rec.course_name || rec.course_code || "Unknown", 
+          code: rec.course_code || rec.subject_id?.course_code || "N/A",
+          name: rec.course_name || rec.subject_id?.course_name || rec.course_code || "Unknown", 
           mid: roundMark(rec.mid_term_marks),
           sess: roundMark(rec.sessional_marks),
           fin: roundMark(rec.end_term_marks),
