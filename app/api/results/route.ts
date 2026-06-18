@@ -18,6 +18,11 @@ function getPool() {
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
+      // 🔒 CRITICAL FIX: Force secure TLS/SSL connections for TiDB Serverless
+      ssl: {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true // Securely handles authentication over public Vercel edge routers
+      }
     });
   }
   return pool;
@@ -37,7 +42,6 @@ export async function GET(request: Request) {
       const page = Number(searchParams.get('page')) || 0;
       const offset = page * 10;
       
-      // Dynamic fallback handling for structural variations in tables
       let sql = `SELECT DISTINCT 
                   registration_number AS reg, 
                   student_name AS name, 
@@ -71,7 +75,6 @@ export async function GET(request: Request) {
       const reg = searchParams.get('reg');
       if (!reg) return NextResponse.json({ data: [] });
 
-      // Pull rows and inject structured standard naming schemas for the client view
       const sql = `SELECT 
                     subject_code AS course_code,
                     subject_name AS course_name,
@@ -86,7 +89,6 @@ export async function GET(request: Request) {
                    
       const [rows]: any = await db.query(sql, [reg.toUpperCase()]);
       
-      // If the safe column selections fail due to database mutations, fall back to wildcards
       if (!rows || rows.length === 0) {
         const [fallbackRows] = await db.query(`SELECT * FROM results WHERE UPPER(registration_number) = ?`, [reg.toUpperCase()]);
         return NextResponse.json({ data: fallbackRows });
