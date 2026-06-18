@@ -558,67 +558,87 @@ export default function DashboardPage() {
         return;
       }
 
-      // 1. DYNAMIC FIX: Extract semester directly from the student's section name string
+      // 1. DYNAMIC FIX: Extract semester and session directly from the student's section string
       const studentCard = searchResults?.find(s => s.reg === reg || s.id === studentId);
       const rawSection = studentCard?.section || "General Data"; 
+      const rawSession = studentCard?.session || "N/A";
       
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
       const calculatedSemester = semMatch ? `Semester ${semMatch[1]}` : "General Data";
 
-      // 2. Deduplicate subjects for flat TiDB records
+      // 2. Deduplicate subjects by max marks
       const uniqueCourses = new Map();
       records.forEach((rec: any) => {
         const sem = rec.semester || calculatedSemester;
         const courseCode = rec.course_code || rec.subject_id?.course_code || "N/A";
         const key = `${sem}-${courseCode}`;
-        const currentTotal = Number(rec.total_marks) || 0;
+        
+        const sess = Number(rec.sessional_marks) || 0;
+        const mid = Number(rec.mid_term_marks) || 0;
+        const fin = Number(rec.end_term_marks) || 0;
+        const prSess = Number(rec.practical_sessional_marks) || 0;
+        const prFin = Number(rec.practical_final_marks) || 0;
+        const dbTot = Number(rec.total_marks) || 0;
+        
+        // Find max total marks dynamically to combat 0/null bug in database records
+        const calcTot = sess + mid + fin + prSess + prFin;
+        const finalTotal = Math.max(dbTot, calcTot);
 
-        if (!uniqueCourses.has(key) || Number(uniqueCourses.get(key).total_marks || 0) < currentTotal) {
-          uniqueCourses.set(key, rec);
+        if (!uniqueCourses.has(key) || uniqueCourses.get(key).finalTotal < finalTotal) {
+          uniqueCourses.set(key, { ...rec, finalTotal, parsedMarks: { sess, mid, fin, prSess, prFin } });
         }
       });
 
-      // 3. Helper to accurately round
-      const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
-
-      // 4. Group the subjects under the correct semester banner
+      // 3. Group the subjects under the correct semester banner
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
         const sem = rec.semester || calculatedSemester;
-        if (!acc[sem]) acc[sem] = [];
+        if (!acc[sem]) {
+          acc[sem] = {
+            courses: [],
+            session: rec.session || rec.academic_sessions?.session_code || rawSession,
+            section: rec.section || rec.sections?.section_name || rawSection
+          };
+        }
         
-        acc[sem].push({
+        const { sess, mid, fin, prSess, prFin } = rec.parsedMarks;
+        
+        acc[sem].courses.push({
           code: rec.course_code || rec.subject_id?.course_code || "N/A",
           name: rec.course_name || rec.subject_id?.course_name || rec.course_code || "Unknown", 
-          mid: roundMark(rec.mid_term_marks),
-          sess: roundMark(rec.sessional_marks),
-          fin: roundMark(rec.end_term_marks),
-          prSess: roundMark(rec.practical_sessional_marks),
-          prFin: roundMark(rec.practical_final_marks),
-          tot: roundMark(rec.total_marks)
+          mid: mid > 0 ? mid : "-",
+          sess: sess > 0 ? sess : "-",
+          fin: fin > 0 ? fin : "-",
+          prSess: prSess > 0 ? prSess : "-",
+          prFin: prFin > 0 ? prFin : "-",
+          tot: rec.finalTotal > 0 ? rec.finalTotal : "-",
+          rawTot: rec.finalTotal
         });
         return acc;
       }, {});
 
-      // 5. Sort semesters descending and Calculate SGPA & Totals
+      // 4. Sort semesters descending and Calculate SGPA & Totals
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
         const numA = parseInt(a.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.replace(/\D/g, '')) || 0;
         return numB - numA; 
       }).map(sem => {
-        const courses = grouped[sem];
+        const semesterData = grouped[sem];
         let totalObtained = 0;
         let totalCh = 0;
         let totalGp = 0;
 
-        courses.forEach((c: any) => {
-          if (c.tot != null) {
-            totalObtained += c.tot;
-            const ch = getCreditHours(c.code, c.tot);
-            const gp = getGradePoint(c.tot);
+        semesterData.courses.forEach((c: any) => {
+          if (c.rawTot > 0) {
+            totalObtained += c.rawTot;
+            const ch = getCreditHours(c.code, c.rawTot);
+            const gp = getGradePoint(c.rawTot);
+            c.ch = ch; // Attach CH to display in UI
             if (ch > 0) {
               totalCh += ch;
               totalGp += (gp * ch);
             }
+          } else {
+             c.ch = getCreditHours(c.code, 0);
           }
         });
 
@@ -626,7 +646,9 @@ export default function DashboardPage() {
 
         return {
           semNum: sem.replace("Semester ", ""), 
-          courses,
+          session: semesterData.session,
+          section: semesterData.section,
+          courses: semesterData.courses,
           totalObtained,
           sgpa
         };
@@ -1198,55 +1220,63 @@ export default function DashboardPage() {
                             ) : (
                               <>
                                 {studentDetails.map((sem: any, sIdx: number) => (
-                                  <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${t.cardBg} overflow-hidden shadow-sm`}>
-                                    <div className={`px-3 py-2 text-[11px] sm:text-xs font-black uppercase tracking-widest ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
-                                      Semester {sem.semNum}
+                                  <div key={sIdx} className="mb-8">
+                                    
+                                    {/* Semester Header (Screenshot Match) */}
+                                    <div className="flex items-center gap-2 mb-4 pl-3 border-l-4 border-[#0056b3] bg-gradient-to-r from-[#0056b3]/5 to-transparent py-2">
+                                      <span className="font-bold text-[#1e293b] dark:text-slate-200">Semester {sem.semNum}</span>
+                                      <span className="text-[#64748b] dark:text-slate-400">|</span>
+                                      <span className="text-[#64748b] dark:text-slate-400 font-medium">{sem.session} | {sem.section}</span>
                                     </div>
-                                    <div className="overflow-x-auto">
-                                      <table className="w-full text-left whitespace-nowrap">
-                                        <thead className={`border-b ${t.border} text-opacity-80`}>
+
+                                    {/* Table */}
+                                    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#00348c] shadow-sm mb-4">
+                                      <table className="w-full text-left whitespace-nowrap bg-white dark:bg-[#001c4d]">
+                                        <thead className="bg-[#0056b3] text-white">
                                           <tr>
-                                            <th className="px-2 py-2 font-bold">Sub</th>
-                                            <th className="px-2 py-2 text-center font-bold">Mid</th>
-                                            <th className="px-2 py-2 text-center font-bold">Sess</th>
-                                            <th className="px-2 py-2 text-center font-bold">Fin</th>
-                                            <th className="px-2 py-2 text-center font-bold">Pr.S</th>
-                                            <th className="px-2 py-2 text-center font-bold">Pr.F</th>
-                                            <th className="px-2 py-2 text-center font-bold">Tot</th>
+                                            <th className="px-4 py-3 font-bold">Subject</th>
+                                            <th className="px-2 py-3 text-center font-bold">Ses</th>
+                                            <th className="px-2 py-3 text-center font-bold">Mid</th>
+                                            <th className="px-2 py-3 text-center font-bold">Fin</th>
+                                            <th className="px-2 py-3 text-center font-bold">Prac<br/>Ses</th>
+                                            <th className="px-2 py-3 text-center font-bold">Prac<br/>Fin</th>
+                                            <th className="px-3 py-3 text-center font-bold">Tot</th>
                                           </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                                        <tbody className="divide-y divide-slate-100 dark:divide-white/10">
                                           {sem.courses.map((course: any, cIdx: number) => (
-                                            <tr key={cIdx} className={t.rowHover}>
-                                              <td className="px-2 py-2 max-w-[120px] sm:max-w-[180px] truncate" title={course.name}>
-                                                <span className="font-semibold block">{course.name}</span>
-                                                <span className="block text-[10px] opacity-70 font-mono mt-0.5">{course.code}</span>
+                                            <tr key={cIdx} className="hover:bg-slate-50 dark:hover:bg-[#00205b]/40">
+                                              <td className="px-4 py-3">
+                                                <span className="font-bold text-[#1e293b] dark:text-slate-100 block mb-0.5">{course.name}</span>
+                                                <span className="block text-[11px] text-[#64748b] dark:text-slate-400 font-mono">
+                                                  {course.code} • CH: {course.ch}
+                                                </span>
                                               </td>
-                                              <td className="px-2 py-2 text-center font-mono">{course.mid ?? "-"}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.sess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.fin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prSess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prFin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? t.primary : ''}`}>{(isAdmin || useCredits) ? (course.tot ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.sess : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{course.mid}</td>
+                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.fin : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.prSess : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.prFin : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-3 py-3 text-center font-bold text-[#1e293b] dark:text-slate-100">{(isAdmin || useCredits) ? course.tot : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                             </tr>
                                           ))}
                                         </tbody>
                                       </table>
                                     </div>
 
-                                    {/* ADDED: Semester Summary Footer */}
-                                    <div className={`flex justify-around items-center p-3 border-t ${t.border} bg-slate-500/5`}>
-                                      <div className="text-center">
-                                        <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-0.5">Obtained Marks</div>
-                                        <div className={`text-lg font-black ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
-                                          {(isAdmin || useCredits) ? sem.totalObtained : <Lock size={14} className="mx-auto" />}
+                                    {/* Footer (Screenshot Match) */}
+                                    <div className="flex justify-around items-center p-4 bg-white dark:bg-[#001c4d] border border-slate-200 dark:border-[#00348c] rounded-xl shadow-sm mb-2">
+                                      <div className="text-center w-1/2">
+                                        <div className="text-[11px] uppercase tracking-wider text-[#64748b] dark:text-slate-400 font-bold mb-1">Obtained</div>
+                                        <div className={`text-xl font-black text-[#1e293b] dark:text-slate-100 ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
+                                          {(isAdmin || useCredits) ? sem.totalObtained : <Lock size={16} className="mx-auto" />}
                                         </div>
                                       </div>
-                                      <div className="w-px h-8 bg-slate-500/20"></div>
-                                      <div className="text-center">
-                                        <div className="text-[10px] uppercase tracking-widest opacity-60 font-bold mb-0.5">SGPA</div>
-                                        <div className={`text-lg font-black ${(isAdmin || useCredits) ? t.primary : 'opacity-50 blur-sm'}`}>
-                                          {(isAdmin || useCredits) ? sem.sgpa : <Lock size={14} className="mx-auto" />}
+                                      <div className="w-px h-10 bg-slate-200 dark:bg-slate-700"></div>
+                                      <div className="text-center w-1/2">
+                                        <div className="text-[11px] uppercase tracking-wider text-[#64748b] dark:text-slate-400 font-bold mb-1">SGPA</div>
+                                        <div className={`text-xl font-black text-[#1e293b] dark:text-slate-100 ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
+                                          {(isAdmin || useCredits) ? sem.sgpa : <Lock size={16} className="mx-auto" />}
                                         </div>
                                       </div>
                                     </div>
