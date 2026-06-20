@@ -1304,8 +1304,8 @@ export default function DashboardPage() {
                   <h4 className="font-bold">Complete Your Payment</h4>
                   <div className={`p-3 rounded-xl text-[12px] font-mono border ${t.border} bg-slate-500/5`}>
                     <p className="opacity-70 mb-1.5">Transfer exact amount via EasyPaisa/JazzCash/Bank to:</p>
-                    <p className={`font-bold text-base ${t.primary}`}>Meezan Bank: 01234567890</p>
-                    <p>Account Title: IUB Portal Technologies</p>
+                    <p className={`font-bold text-base ${t.primary}`}>Easypaisa: 03119277832</p>
+                    <p>Account Title: Sabil</p>
                   </div>
                   
                   {paymentForm.package === 'custom' && (
