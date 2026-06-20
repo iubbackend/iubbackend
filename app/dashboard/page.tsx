@@ -20,34 +20,6 @@ const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 const ADMIN_REG = "S25BARIN1M01118";
 const SEARCH_COST = 1500; 
 
-// --- CALCULATION HELPERS ---
-const getCreditHours = (code: string, totalMarks: number) => {
-  const codeUpper = String(code).toUpperCase().replace(/[\s-]/g, "");
-  const manualFixes: Record<string, number> = {
-    "ISL101": 2.0, "ISLAMICSTUDIES": 2.0, "CS101": 4.0, "CS102": 4.0, "PAK101": 2.0, "HQ101": 1.0, "HQ001": 1.0
-  };
-  if (manualFixes[codeUpper]) return manualFixes[codeUpper];
-
-  const tm = Math.round(Number(totalMarks) || 0);
-  if (tm >= 15 && tm <= 55) return 1.0;
-  if (tm >= 56 && tm <= 80) return 2.0;
-  return 3.0; // Default
-};
-
-const getGradePoint = (marks: number) => {
-  const m = Math.round(Number(marks) || 0);
-  if (m >= 85) return 4.0;
-  if (m < 50) return 0.0;
-  const gradingMap: Record<number, number> = {
-    50: 1.0, 51: 1.1, 52: 1.2, 53: 1.3, 54: 1.4, 55: 1.5, 56: 1.6, 57: 1.7, 58: 1.8, 59: 1.9,
-    60: 2.0, 61: 2.1, 62: 2.2, 63: 2.3, 64: 2.4, 65: 2.5, 66: 2.6, 67: 2.7, 68: 2.8, 69: 2.9,
-    70: 3.0, 71: 3.1, 72: 3.1, 73: 3.2, 74: 3.3, 75: 3.3, 76: 3.4, 77: 3.5, 78: 3.5, 79: 3.6,
-    80: 3.7, 81: 3.7, 82: 3.8, 83: 3.9, 84: 3.9
-  };
-  return gradingMap[m] || 0.0;
-};
-// ---------------------------
-
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
 type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats";
@@ -497,47 +469,58 @@ export default function DashboardPage() {
     setPage(newPage);
 
     try {
-      // 🔗 Updated to use TiDB API Route
-      const params = new URLSearchParams({
-        action: 'search',
-        mode: activeMode,
-        query: activeQuery,
-        page: newPage.toString()
-      });
+      let query = supabase.from("students").select(`id, reg, name, academic_sessions(session_code), sections(section_name)`, { count: 'exact' });
 
-      // Pass along any filters if searching by Name
-      if (activeMode === "Name") {
-        if (selectedSession) params.append('session_id', selectedSession.id.toString());
-        if (selectedDept) params.append('department_id', selectedDept.id.toString());
-        if (selectedSection) params.append('section_id', selectedSection.id.toString());
+      if (activeMode === "Roll Number") {
+        query = query.ilike("reg", `%${activeQuery.trim()}%`);
+      } else {
+        query = query.ilike("name", `%${activeQuery.trim()}%`);
+        
+        if (selectedSession) query = query.eq("session_id", selectedSession.id);
+        if (selectedSection) query = query.eq("section_id", selectedSection.id);
+        
+        if (selectedDept) {
+          const { data: matchingResults } = await supabase.from("results").select("student_id").eq("department_id", selectedDept.id);
+          const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
+          if (studentIds.length === 0) {
+            setSearchResults([]);
+            setTotalRecords(0);
+            setIsSearching(false);
+            return;
+          }
+          query = query.in("id", studentIds);
+        }
       }
 
-      const res = await fetch(`/api/results?${params}`);
-      if (!res.ok) throw new Error("Failed to fetch results from database");
-      
-      const { data, count } = await res.json();
+      query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
+      const { data, count, error } = await query;
+      if (error) throw error;
 
-      const mappedData = (data || []).map((s: any, idx: number) => ({
-        id: s.id || idx, 
-        reg: s.reg, 
-        name: s.name,
-        session: s.session || s.academic_sessions?.session_code || "N/A",
-        section: s.section || s.sections?.section_name || "N/A"
-      }));
-
-      setSearchResults(mappedData);
+      setSearchResults((data || []).map((s: any) => ({
+        id: s.id, reg: s.reg, name: s.name,
+        session: s.academic_sessions?.session_code || "N/A",
+        section: s.sections?.section_name || "N/A"
+      })));
       setTotalRecords(count || 0);
-
-      // Auto-expand immediately if it's an exact Roll Number search yielding 1 result
-      if (activeMode === "Roll Number" && mappedData.length === 1 && newPage === 0) {
-        setTimeout(() => handleExpandResult(mappedData[0].reg, mappedData[0].id || 0), 50);
-      }
 
     } catch (err) {
       showToast("Error", "Could not complete search.", "error");
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const getGradeInfo = (marks: number | null) => {
+    if (marks === null) return { gp: 0, grade: 'N/A' };
+    if (marks >= 85) return { gp: 4.0, grade: 'A' };
+    if (marks >= 80) return { gp: 3.7, grade: 'A-' };
+    if (marks >= 75) return { gp: 3.3, grade: 'B+' };
+    if (marks >= 70) return { gp: 3.0, grade: 'B' };
+    if (marks >= 65) return { gp: 2.7, grade: 'B-' };
+    if (marks >= 60) return { gp: 2.3, grade: 'C+' };
+    if (marks >= 55) return { gp: 2.0, grade: 'C' };
+    if (marks >= 50) return { gp: 1.7, grade: 'C-' };
+    return { gp: 0.0, grade: 'F' };
   };
 
  const handleExpandResult = async (reg: string, studentId: number) => {
@@ -548,109 +531,100 @@ export default function DashboardPage() {
     setExpandedReg(reg);
 
     try {
-      // 🔗 Updated to use TiDB API Route for expand
-      const res = await fetch(`/api/results?action=expand&reg=${encodeURIComponent(reg)}`);
-      if (!res.ok) throw new Error("Failed to load details");
-      const { data: records } = await res.json();
+      const columns = (isAdmin || useCredits)
+        ? "id, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester"
+        : "id, mid_term_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester";
+
+      const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId); 
+      if (error) throw error;
 
       if (!records || records.length === 0) {
         setStudentDetails([]);
         return;
       }
 
-      // 1. DYNAMIC FIX: Extract semester and session directly from the student's section string
-      const studentCard = searchResults?.find(s => s.reg === reg || s.id === studentId);
-      const rawSection = studentCard?.section || "General Data"; 
-      const rawSession = studentCard?.session || "N/A";
+      // 1. DYNAMIC FIX: Extract semester directly from the student's section name string
+      const studentCard = searchResults?.find(s => s.id === studentId);
+      const rawSection = studentCard?.section || "General Data"; // e.g., "BSACCF-8TH-1M"
       
+      // Use regex to find the number before "TH", "RD", "ND", "ST" in the section name
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
       const calculatedSemester = semMatch ? `Semester ${semMatch[1]}` : "General Data";
 
-      // 2. Deduplicate subjects by max marks
+      // 2. Deduplicate subjects: keep only the record with the highest total_marks
       const uniqueCourses = new Map();
       records.forEach((rec: any) => {
         const sem = rec.semester || calculatedSemester;
-        const courseCode = rec.course_code || rec.subject_id?.course_code || "N/A";
+        const courseCode = rec.subject_id?.course_code || "N/A";
         const key = `${sem}-${courseCode}`;
-        
-        const sess = Number(rec.sessional_marks) || 0;
-        const mid = Number(rec.mid_term_marks) || 0;
-        const fin = Number(rec.end_term_marks) || 0;
-        const prSess = Number(rec.practical_sessional_marks) || 0;
-        const prFin = Number(rec.practical_final_marks) || 0;
-        const dbTot = Number(rec.total_marks) || 0;
-        
-        // Find max total marks dynamically to combat 0/null bug in database records
-        const calcTot = sess + mid + fin + prSess + prFin;
-        const finalTotal = Math.max(dbTot, calcTot);
+        const currentTotal = Number(rec.total_marks) || 0;
 
-        if (!uniqueCourses.has(key) || uniqueCourses.get(key).finalTotal < finalTotal) {
-          uniqueCourses.set(key, { ...rec, finalTotal, parsedMarks: { sess, mid, fin, prSess, prFin } });
+        if (!uniqueCourses.has(key) || Number(uniqueCourses.get(key).total_marks || 0) < currentTotal) {
+          uniqueCourses.set(key, rec);
         }
       });
 
-      // 3. Group the subjects under the correct semester banner
+      // 3. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
+      const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
+
+      // 4. Group the subjects under the correct semester banner
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
         const sem = rec.semester || calculatedSemester;
-        if (!acc[sem]) {
-          acc[sem] = {
-            courses: [],
-            session: rec.session || rec.academic_sessions?.session_code || rawSession,
-            section: rec.section || rec.sections?.section_name || rawSection
-          };
-        }
         
-        const { sess, mid, fin, prSess, prFin } = rec.parsedMarks;
+        if (!acc[sem]) acc[sem] = [];
         
-        acc[sem].courses.push({
-          code: rec.course_code || rec.subject_id?.course_code || "N/A",
-          name: rec.course_name || rec.subject_id?.course_name || rec.course_code || "Unknown", 
-          mid: mid > 0 ? mid : "-",
-          sess: sess > 0 ? sess : "-",
-          fin: fin > 0 ? fin : "-",
-          prSess: prSess > 0 ? prSess : "-",
-          prFin: prFin > 0 ? prFin : "-",
-          tot: rec.finalTotal > 0 ? rec.finalTotal : "-",
-          rawTot: rec.finalTotal
+        const totalMarks = (isAdmin || useCredits) ? roundMark(rec.total_marks) : null;
+        const gradeInfo = (isAdmin || useCredits) ? getGradeInfo(totalMarks) : { gp: 0, grade: '🔒' };
+        const credits = Number(rec.subject_id?.credit_hours) || 3;
+
+        acc[sem].push({
+          code: rec.subject_id?.course_code || "N/A",
+          name: rec.subject_id?.course_name || "Unknown",
+          credits: credits,
+          mid: roundMark(rec.mid_term_marks),
+          sess: roundMark(rec.sessional_marks),
+          fin: roundMark(rec.end_term_marks),
+          prSess: roundMark(rec.practical_sessional_marks),
+          prFin: roundMark(rec.practical_final_marks),
+          tot: totalMarks,
+          gp: gradeInfo.gp,
+          grade: gradeInfo.grade
         });
         return acc;
       }, {});
 
-      // 4. Sort semesters descending and Calculate SGPA & Totals
+      // 5. Sort semesters descending (latest first), strip the text, and calculate SGPA
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
         const numA = parseInt(a.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.replace(/\D/g, '')) || 0;
         return numB - numA; 
       }).map(sem => {
-        const semesterData = grouped[sem];
-        let totalObtained = 0;
-        let totalCh = 0;
-        let totalGp = 0;
+        const courses = grouped[sem];
+        let totalQualityPoints = 0;
+        let totalCr = 0;
+        let semTotalMarks = 0;
+        let semMaxMarks = 0;
+        let canCalculate = (isAdmin || useCredits);
 
-        semesterData.courses.forEach((c: any) => {
-          if (c.rawTot > 0) {
-            totalObtained += c.rawTot;
-            const ch = getCreditHours(c.code, c.rawTot);
-            const gp = getGradePoint(c.rawTot);
-            c.ch = ch; // Attach CH to display in UI
-            if (ch > 0) {
-              totalCh += ch;
-              totalGp += (gp * ch);
-            }
-          } else {
-             c.ch = getCreditHours(c.code, 0);
-          }
+        courses.forEach((c: any) => {
+           if (canCalculate && c.tot !== null) {
+             totalQualityPoints += (c.gp * c.credits);
+             totalCr += c.credits;
+             semTotalMarks += c.tot;
+             semMaxMarks += 100; // Standardize out of 100 per course
+           } else if (!canCalculate) {
+             totalCr += c.credits;
+           }
         });
 
-        const sgpa = totalCh > 0 ? (totalGp / totalCh).toFixed(2) : "0.00";
+        const sgpa = canCalculate && totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : (canCalculate ? "0.00" : "🔒");
 
         return {
           semNum: sem.replace("Semester ", ""), 
-          session: semesterData.session,
-          section: semesterData.section,
-          courses: semesterData.courses,
-          totalObtained,
-          sgpa
+          courses: courses,
+          sgpa: sgpa,
+          totalMarks: canCalculate ? semTotalMarks : "🔒",
+          maxMarks: canCalculate ? semMaxMarks : "🔒"
         };
       });
 
@@ -1205,7 +1179,12 @@ export default function DashboardPage() {
                         <div className={`text-[12px] ${t.textMuted} font-medium`}>{student.session} • {student.section}</div>
                       </div>
                       <button className={`p-1.5 rounded-full ${t.textMuted} hover:${t.primary} bg-slate-500/5 transition-colors`}>
-                        {expandedReg === student.reg ? <ChevronDown size={18} /> : <ArrowRight size={18} />}
+                        <motion.div
+                           animate={{ rotate: expandedReg === student.reg ? 180 : 0 }}
+                           transition={{ duration: 0.3 }}
+                        >
+                          <ChevronDown size={20} />
+                        </motion.div>
                       </button>
                     </div>
 
@@ -1220,67 +1199,58 @@ export default function DashboardPage() {
                             ) : (
                               <>
                                 {studentDetails.map((sem: any, sIdx: number) => (
-                                  <div key={sIdx} className="mb-8">
-                                    
-                                    {/* Semester Header (Screenshot Match) */}
-                                    <div className="flex items-center gap-2 mb-4 pl-3 border-l-4 border-[#0056b3] bg-gradient-to-r from-[#0056b3]/5 to-transparent py-2">
-                                      <span className="font-bold text-[#1e293b] dark:text-slate-200">Semester {sem.semNum}</span>
-                                      <span className="text-[#64748b] dark:text-slate-400">|</span>
-                                      <span className="text-[#64748b] dark:text-slate-400 font-medium">{sem.session} | {sem.section}</span>
+                                  <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${t.cardBg} overflow-hidden shadow-sm`}>
+                                    <div className={`px-3 py-2 text-[11px] sm:text-xs font-black uppercase tracking-widest ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
+                                      Semester {sem.semNum}
                                     </div>
-
-                                    {/* Table */}
-                                    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#00348c] shadow-sm mb-4">
-                                      <table className="w-full text-left whitespace-nowrap bg-white dark:bg-[#001c4d]">
-                                        <thead className="bg-[#0056b3] text-white">
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-left whitespace-nowrap">
+                                        <thead className={`border-b ${t.border} text-opacity-80`}>
                                           <tr>
-                                            <th className="px-4 py-3 font-bold">Subject</th>
-                                            <th className="px-2 py-3 text-center font-bold">Ses</th>
-                                            <th className="px-2 py-3 text-center font-bold">Mid</th>
-                                            <th className="px-2 py-3 text-center font-bold">Fin</th>
-                                            <th className="px-2 py-3 text-center font-bold">Prac<br/>Ses</th>
-                                            <th className="px-2 py-3 text-center font-bold">Prac<br/>Fin</th>
-                                            <th className="px-3 py-3 text-center font-bold">Tot</th>
+                                            <th className="px-2 py-2 font-bold">Sub</th>
+                                            <th className="px-2 py-2 text-center font-bold">CR</th>
+                                            <th className="px-2 py-2 text-center font-bold">Mid</th>
+                                            <th className="px-2 py-2 text-center font-bold">Sess</th>
+                                            <th className="px-2 py-2 text-center font-bold">Fin</th>
+                                            <th className="px-2 py-2 text-center font-bold">Pr.S</th>
+                                            <th className="px-2 py-2 text-center font-bold">Pr.F</th>
+                                            <th className="px-2 py-2 text-center font-bold">Tot</th>
+                                            <th className="px-2 py-2 text-center font-bold">Gr</th>
                                           </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-white/10">
+                                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                                           {sem.courses.map((course: any, cIdx: number) => (
-                                            <tr key={cIdx} className="hover:bg-slate-50 dark:hover:bg-[#00205b]/40">
-                                              <td className="px-4 py-3">
-                                                <span className="font-bold text-[#1e293b] dark:text-slate-100 block mb-0.5">{course.name}</span>
-                                                <span className="block text-[11px] text-[#64748b] dark:text-slate-400 font-mono">
-                                                  {course.code} • CH: {course.ch}
-                                                </span>
+                                            <tr key={cIdx} className={t.rowHover}>
+                                              <td className="px-2 py-2 max-w-[120px] sm:max-w-[180px] truncate" title={course.name}>
+                                                <span className="font-semibold block">{course.name}</span>
+                                                <span className="block text-[10px] opacity-70 font-mono mt-0.5">{course.code}</span>
                                               </td>
-                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.sess : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{course.mid}</td>
-                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.fin : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.prSess : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-3 text-center text-[#64748b] dark:text-slate-300">{(isAdmin || useCredits) ? course.prFin : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-3 py-3 text-center font-bold text-[#1e293b] dark:text-slate-100">{(isAdmin || useCredits) ? course.tot : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono opacity-80">{course.credits}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{course.mid ?? "-"}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.sess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.fin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prSess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prFin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? t.primary : ''}`}>{(isAdmin || useCredits) ? (course.tot ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? (course.grade === 'F' ? 'text-red-400' : 'text-emerald-500') : ''}`}>{(isAdmin || useCredits) ? (course.grade ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                             </tr>
                                           ))}
                                         </tbody>
                                       </table>
                                     </div>
-
-                                    {/* Footer (Screenshot Match) */}
-                                    <div className="flex justify-around items-center p-4 bg-white dark:bg-[#001c4d] border border-slate-200 dark:border-[#00348c] rounded-xl shadow-sm mb-2">
-                                      <div className="text-center w-1/2">
-                                        <div className="text-[11px] uppercase tracking-wider text-[#64748b] dark:text-slate-400 font-bold mb-1">Obtained</div>
-                                        <div className={`text-xl font-black text-[#1e293b] dark:text-slate-100 ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
-                                          {(isAdmin || useCredits) ? sem.totalObtained : <Lock size={16} className="mx-auto" />}
-                                        </div>
+                                    <div className={`px-3 py-3 sm:px-4 flex justify-between items-center text-xs border-t ${t.border} ${theme === 'light' ? 'bg-slate-100/50' : 'bg-[#00205b]/30'}`}>
+                                      <div className="font-bold opacity-80">
+                                        Total Credits: {sem.courses.reduce((acc: number, c: any) => acc + c.credits, 0)}
                                       </div>
-                                      <div className="w-px h-10 bg-slate-200 dark:bg-slate-700"></div>
-                                      <div className="text-center w-1/2">
-                                        <div className="text-[11px] uppercase tracking-wider text-[#64748b] dark:text-slate-400 font-bold mb-1">SGPA</div>
-                                        <div className={`text-xl font-black text-[#1e293b] dark:text-slate-100 ${(isAdmin || useCredits) ? '' : 'opacity-50 blur-sm'}`}>
-                                          {(isAdmin || useCredits) ? sem.sgpa : <Lock size={16} className="mx-auto" />}
+                                      <div className="flex items-center gap-4 sm:gap-6">
+                                        <div className="font-bold">
+                                          Marks: <span className={t.primary}>{sem.totalMarks}</span> {sem.maxMarks !== "🔒" && <span className="opacity-70">/ {sem.maxMarks}</span>}
+                                        </div>
+                                        <div className="font-black text-[13px] sm:text-sm bg-emerald-500/10 text-emerald-500 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                                          SGPA: {sem.sgpa}
                                         </div>
                                       </div>
                                     </div>
-
                                   </div>
                                 ))}
                               </>
