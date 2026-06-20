@@ -1208,14 +1208,14 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <p className="font-bold text-sm">Detailed Marks are Locked</p>
-                        <p className="text-[11px] opacity-80">Your balance is 0. Upgrade plan to unlock full mid, sessional, and final marks.</p>
+                        <p className="text-[11px] opacity-80">You are low in balance. Upgrade plan to unlock full mid, sessional, and final marks.</p>
                       </div>
                     </div>
                     <button 
                       onClick={() => setActiveTab('credits')} 
                       className="w-full sm:w-auto text-center font-black text-xs uppercase tracking-wider px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-[#00122a] rounded-xl shadow-lg shadow-amber-500/10 active:scale-[0.98] transition-all transform whitespace-nowrap"
                     >
-                      Top Up Wallet &rarr;
+                      Pay to See All Results &rarr;
                     </button>
                   </motion.div>
                 )}
