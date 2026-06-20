@@ -4,16 +4,16 @@ import { useEffect } from 'react';
 
 export default function PWARegistration() {
   useEffect(() => {
-    if ('serviceWorker' in navigator && window.workbox !== undefined) {
+    // Check if the user's browser natively supports Service Workers
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
-          .then((reg) => console.log('Service Worker running safely on scope:', reg.scope))
-          .catch((err) => console.error('Service Worker registration failed:', err));
-      });
-    } else if ('serviceWorker' in navigator) {
-      // Fallback for standard native execution
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js');
+          .then((reg) => {
+            console.log('PWA Service Worker running safely on scope:', reg.scope);
+          })
+          .catch((err) => {
+            console.error('PWA Service Worker registration failed:', err);
+          });
       });
     }
   }, []);
