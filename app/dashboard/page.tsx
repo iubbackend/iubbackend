@@ -523,6 +523,20 @@ export default function DashboardPage() {
     return { gp: 0.0, grade: 'F' };
   };
 
+  const parseSessionFromReg = (reg: string) => {
+    if (!reg) return "N/A";
+    const cleanReg = reg.trim().toUpperCase();
+    
+    // Extract the first character (S or F) and the next two digits
+    const match = cleanReg.match(/^(S|F)(\d{2})/);
+    if (!match) return "N/A";
+  
+    const semesterType = match[1] === "S" ? "Spring" : match[1] === "F" ? "Fall" : "Unknown";
+    const year = `20${match[2]}`;
+  
+    return `${semesterType} ${year}`;
+  };
+
  const handleExpandResult = async (reg: string, studentId: number) => {
     if (expandedReg === reg) {
       setExpandedReg(null);
@@ -1177,7 +1191,7 @@ export default function DashboardPage() {
                           <h3 className="font-bold">{student.name}</h3>
                         </div>
                         <div className={`text-[12px] ${t.textMuted} font-medium`}>
-                          {student.session} • {student.section?.replace(/[- ]?\d+(st|nd|rd|th)[- ]?/i, ' • ')}
+                          Session: {parseSessionFromReg(student.reg)} • {student.section?.replace(/[- ]?\d+(st|nd|rd|th)[- ]?/i, ' • ')}
                         </div>
                       </div>
                       <button className={`p-1.5 rounded-full ${t.textMuted} hover:${t.primary} bg-slate-500/5 transition-colors`}>
