@@ -1,7 +1,7 @@
 {
-  "name": "IUB Result Portal",
-  "short_name": "IUB Portal",
-  "description": "IUB Results Portal",
+  "name": "IUB Backend Portal",
+  "short_name": "IUB Backend",
+  "description": "IUB Backend Result Portal",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#000a1a",
