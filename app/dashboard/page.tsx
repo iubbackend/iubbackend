@@ -523,6 +523,42 @@ export default function DashboardPage() {
     return { gp: 0.0, grade: 'F' };
   };
 
+  const getSemesterNumber = (reg: string, currentSemName: string) => {
+    if (!reg || !currentSemName) return "";
+  
+    const cleanReg = reg.trim().toUpperCase();
+    const cleanSem = currentSemName.trim().toUpperCase();
+  
+    // 1. Parse entry session from Reg (e.g., S25 -> Spring 2025)
+    const regMatch = cleanReg.match(/^(S|F)(\d{2})/);
+    // 2. Parse the target semester session name (e.g., SPRING 2026 or FALL 2024)
+    const semMatch = cleanSem.match(/(SPRING|FALL)\s+(\d{4})/);
+  
+    if (!regMatch || !semMatch) return currentSemName; // Fallback to original text if formats don't match
+  
+    const entryIsSpring = regMatch[1] === "S";
+    const entryYear = 2000 + parseInt(regMatch[2]);
+  
+    const targetIsSpring = semMatch[1] === "SPRING";
+    const targetYear = parseInt(semMatch[2]);
+  
+    // Convert both periods into an absolute sequence count (2 terms per year)
+    const entrySequence = (entryYear * 2) + (entryIsSpring ? 0 : 1);
+    const targetSequence = (targetYear * 2) + (targetIsSpring ? 0 : 1);
+  
+    // Calculate difference (1-based index: entry semester is 1st semester)
+    const semesterNum = (targetSequence - entrySequence) + 1;
+  
+    if (semesterNum <= 0) return currentSemName; // Fallback for edge cases/exemption data
+  
+    // Append ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
+    const suffixes = ["th", "st", "nd", "rd"];
+    const v = semesterNum % 100;
+    const suffix = suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
+  
+    return `${semesterNum}${suffix} Semester • ${semMatch[1].charAt(0) + semMatch[1].slice(1).toLowerCase()} ${targetYear}`;
+  };
+
   const parseSessionFromReg = (reg: string) => {
     if (!reg) return "N/A";
     const cleanReg = reg.trim().toUpperCase();
@@ -1217,7 +1253,7 @@ export default function DashboardPage() {
                                 {studentDetails.map((sem: any, sIdx: number) => (
                                   <div key={sIdx} className={`rounded-[1rem] border ${t.border} ${t.cardBg} overflow-hidden shadow-sm`}>
                                     <div className={`px-3 py-2 text-[11px] sm:text-xs font-black uppercase tracking-widest ${theme === 'light' ? 'bg-[#0056b3]/5 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
-                                      Semester {sem.semNum}
+                                      {getSemesterNumber(student.reg, sem.semNum)}
                                     </div>
                                     <div className="overflow-x-auto">
                                       <table className="w-full text-left whitespace-nowrap">
