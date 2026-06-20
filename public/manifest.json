@@ -1,0 +1,25 @@
+{
+  "name": "IUB Backend",
+  "short_name": "IUB Result Portal",
+  "description": "IUB Results | Marks | Other's Result",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#000a1a",
+  "theme_color": "#00122a",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
