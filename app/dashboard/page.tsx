@@ -7,7 +7,7 @@ import {
   Sun, Moon, ChevronDown, Lock,
   Menu, CreditCard, History, Share2, Wallet,
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle,
-  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send
+  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send, Download, Unlock
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
@@ -68,8 +68,8 @@ export default function DashboardPage() {
   const isAdmin = currentUser.reg === ADMIN_REG;
 
   const [credits, setCredits] = useState(0);
-  const [useCredits, setUseCredits] = useState(false);
   const [freeAttempts, setFreeAttempts] = useState(4);
+  const isProMode = isAdmin || credits >= SEARCH_COST;
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabState>("home");
@@ -92,9 +92,11 @@ export default function DashboardPage() {
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [expandedReg, setExpandedReg] = useState<string | null>(null);
   const [studentDetails, setStudentDetails] = useState<any[] | null>(null);
+  const [unlockedRegs, setUnlockedRegs] = useState<Set<string>>(new Set());
 
   const [paymentForm, setPaymentForm] = useState({ package: "", amount: "", name: "", tid: "" });
   const [historyLogs, setHistoryLogs] = useState<HistoryLogs>({ deposits: [], usage: [] });
+  const [walletPage, setWalletPage] = useState(1);
   const [paidSearchHistory, setPaidSearchHistory] = useState<any[]>([]);
   const [creditsTabLoading, setCreditsTabLoading] = useState(false);
 
@@ -109,13 +111,40 @@ export default function DashboardPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [adminChatList, setAdminChatList] = useState<{reg: string, name: string, unread: number}[]>([]);
+  const [adminChatList, setAdminChatList] = useState<{reg: string, name: string, unread: number, last_msg_time: string}[]>([]);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [activeAdminChatUser, setActiveAdminChatUser] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // PWA STATE
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const installPWA = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setDeferredPrompt(null);
+    }
+  };
 
   useEffect(() => {
     async function fetchInitialData() {
       try {
+        const cachedFilters = localStorage.getItem('iub_filterOptions');
+        if (cachedFilters) setFilterOptions(JSON.parse(cachedFilters));
+
+        const cachedStats = localStorage.getItem('iub_adminStats');
+        if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
+
         const { data: { session } } = await supabase.auth.getSession();
 
         if (!session?.user?.email) {
@@ -140,16 +169,17 @@ export default function DashboardPage() {
         if (actualReg !== "UNKNOWN") {
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
           if (userCreditsRes) {
-            const dbCredits = userCreditsRes.credits || 0;
-            setCredits(dbCredits);
+            setCredits(userCreditsRes.credits || 0);
             setFreeAttempts(Math.max(0, 4 - (userCreditsRes.free_searches_today || 0)));
-            // Auto-enable credits if they have a balance
-            if (dbCredits > 0 && actualReg !== ADMIN_REG) {
-              setUseCredits(true);
-            }
-          } else {
-            setCredits(0);
-            setFreeAttempts(4);
+          }
+          
+          // Realtime Credits Update Subscription
+          if (actualReg !== ADMIN_REG) {
+             const channel = supabase.channel('credits_update')
+               .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_credits', filter: `user_reg=eq.${actualReg}` }, (payload) => {
+                  setCredits(payload.new.credits);
+                  setFreeAttempts(Math.max(0, 4 - (payload.new.free_searches_today || 0)));
+               }).subscribe();
           }
         }
 
@@ -159,11 +189,13 @@ export default function DashboardPage() {
           supabase.from("sections").select("id, section_name, session_id, department_id")
         ]);
 
-        setFilterOptions({
+        const newFilters = {
           departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
           sessions: (sessionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.session_code })),
           sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
-        });
+        };
+        setFilterOptions(newFilters);
+        localStorage.setItem('iub_filterOptions', JSON.stringify(newFilters));
 
         if (actualReg === ADMIN_REG) {
           loadRealAdminData();
@@ -181,7 +213,7 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    if (activeTab === "credits") loadCreditsHistory();
+    if (activeTab === "credits") loadCreditsHistory(1);
     if (activeTab === "history") loadPaidSearchHistory();
     if (activeTab === "contact" && !isAdmin) loadUserChat();
     if (activeTab === "admin_chats" && isAdmin) loadAdminChatList();
@@ -208,14 +240,16 @@ export default function DashboardPage() {
       const { count: premiumCount } = await supabase.from('user_credits').select('*', { count: 'exact', head: true }).gt('credits', 0);
       const { count: searchCount } = await supabase.from('user_search_log').select('*', { count: 'exact', head: true });
 
-      setAdminStats({
+      const stats = {
         sales: totalSales,
         pending: pendingData?.length || 0,
         totalUsers: userCount || 0,
         premiumUsers: premiumCount || 0,
         profit: totalProfit,
         searches: searchCount || 0
-      });
+      };
+      setAdminStats(stats);
+      localStorage.setItem('iub_adminStats', JSON.stringify(stats));
 
       const { data: topUsers } = await supabase.from('user_credits').select('user_reg, credits').order('credits', { ascending: false }).limit(10);
       setLeaderboard(topUsers || []);
@@ -224,15 +258,22 @@ export default function DashboardPage() {
     }
   };
 
-  const loadCreditsHistory = async () => {
+  const loadCreditsHistory = async (page = 1) => {
     setCreditsTabLoading(true);
+    setWalletPage(page);
     try {
       if (!currentUser.reg) return;
+      const cachedHistory = localStorage.getItem('iub_historyLogs');
+      if (cachedHistory && page === 1) setHistoryLogs(JSON.parse(cachedHistory));
+
+      const limit = 7 + (page - 1) * 10;
       const [depRes, usageRes] = await Promise.all([
-        supabase.from("payments_record").select("*").ilike("user_reg", currentUser.reg).order("created_at", { ascending: false }),
-        supabase.from("user_search_log").select("*").ilike("searcher_reg", currentUser.reg).eq("search_type", "Paid Search").order("created_at", { ascending: false }).limit(20)
+        supabase.from("payments_record").select("*").ilike("user_reg", currentUser.reg).order("created_at", { ascending: false }).limit(limit),
+        supabase.from("user_search_log").select("*").ilike("searcher_reg", currentUser.reg).eq("search_type", "Paid Search").order("created_at", { ascending: false }).limit(limit)
       ]);
-      setHistoryLogs({ deposits: depRes.data || [], usage: usageRes.data || [] });
+      const newLogs = { deposits: depRes.data || [], usage: usageRes.data || [] };
+      setHistoryLogs(newLogs);
+      if (page === 1) localStorage.setItem('iub_historyLogs', JSON.stringify(newLogs));
     } catch (err) {
       console.error("Failed to load history", err);
     } finally {
@@ -249,7 +290,6 @@ export default function DashboardPage() {
         .eq("search_type", "Paid Search")
         .order("created_at", { ascending: false });
       
-      // Deduplicate by target search query
       const uniqueHistory: any[] = [];
       const seenQueries = new Set();
       (data || []).forEach(log => {
@@ -308,8 +348,10 @@ export default function DashboardPage() {
     try {
       const { data } = await supabase.rpc('get_admin_chat_list'); 
       if (data) {
-        setAdminChatList(data);
-        const totalUnread = data.reduce((sum: number, u: any) => sum + u.unread, 0);
+        // Sort by last message time descending (WhatsApp style)
+        const sorted = data.sort((a: any, b: any) => new Date(b.last_msg_time).getTime() - new Date(a.last_msg_time).getTime());
+        setAdminChatList(sorted);
+        const totalUnread = sorted.reduce((sum: number, u: any) => sum + u.unread, 0);
         setHasUnreadMessages(totalUnread > 0);
       }
     } catch(e) {}
@@ -355,6 +397,31 @@ export default function DashboardPage() {
       await supabase.from('messages').delete().eq('id', id);
       isAdmin && activeAdminChatUser ? loadAdminSingleChat(activeAdminChatUser) : loadUserChat();
     } catch(e) {}
+  };
+
+  const handleAdminDeleteEntireChat = async () => {
+    if (!activeAdminChatUser) return;
+    try {
+      await supabase.from('messages').delete().or(`and(sender_reg.eq.${activeAdminChatUser},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${activeAdminChatUser})`);
+      setActiveAdminChatUser(null);
+      loadAdminChatList();
+      showToast("Deleted", "Entire chat deleted.", "info");
+    } catch (e) {}
+  };
+
+  const searchAdminChatUser = async () => {
+    if (!chatSearchQuery.trim()) return;
+    try {
+      const { data } = await supabase.from('users').select('reg, email, phone').or(`reg.ilike.%${chatSearchQuery}%,email.ilike.%${chatSearchQuery}%`).limit(5);
+      if (data && data.length > 0) {
+        const mapped = data.map(u => ({ reg: u.reg, name: u.email, unread: 0, last_msg_time: new Date().toISOString() }));
+        setAdminChatList(prev => {
+          const combined = [...mapped, ...prev];
+          const unique = Array.from(new Map(combined.map(item => [item.reg, item])).values());
+          return unique;
+        });
+      }
+    } catch (e) {}
   };
 
   const showToast = (title: string, desc: string, type: 'error'|'info' = 'error') => {
@@ -439,27 +506,8 @@ export default function DashboardPage() {
     const activeMode = overrideMode !== undefined ? overrideMode : searchMode;
 
     if (!activeQuery.trim()) return;
-    
-    if (newPage === 0 && !isAdmin) {
-      if (useCredits) {
-        if (credits < SEARCH_COST) {
-          showToast("Insufficient Credits", `You need ${SEARCH_COST} credits to search.`, "error");
-          setActiveTab("credits");
-          return;
-        }
-        setCredits(p => p - SEARCH_COST);
-        await supabase.rpc('deduct_credits', { p_user_reg: currentUser.reg, p_cost: SEARCH_COST });
-        logSearch(activeQuery, "Paid Search");
-      } else {
-        if (freeAttempts <= 0) {
-          showToast("Limits Exhausted", "Turn on Use Credits or wait until tomorrow.", "error");
-          return;
-        }
-        setFreeAttempts(p => p - 1);
-        await supabase.rpc('deduct_free_attempt', { p_user_reg: currentUser.reg });
-        logSearch(activeQuery, "Free Search");
-      }
-    } else if (newPage === 0 && isAdmin) {
+
+    if (newPage === 0 && isAdmin) {
       logSearch(activeQuery, "Admin Search");
     }
 
@@ -529,12 +577,10 @@ export default function DashboardPage() {
     const cleanReg = reg.trim().toUpperCase();
     const cleanSem = currentSemName.trim().toUpperCase();
   
-    // 1. Parse entry session from Reg (e.g., S25 -> Spring 2025)
     const regMatch = cleanReg.match(/^(S|F)(\d{2})/);
-    // 2. Parse the target semester session name (e.g., SPRING 2026 or FALL 2024)
     const semMatch = cleanSem.match(/(SPRING|FALL)\s+(\d{4})/);
   
-    if (!regMatch || !semMatch) return currentSemName; // Fallback to original text if formats don't match
+    if (!regMatch || !semMatch) return currentSemName; 
   
     const entryIsSpring = regMatch[1] === "S";
     const entryYear = 2000 + parseInt(regMatch[2]);
@@ -542,16 +588,13 @@ export default function DashboardPage() {
     const targetIsSpring = semMatch[1] === "SPRING";
     const targetYear = parseInt(semMatch[2]);
   
-    // Convert both periods into an absolute sequence count (2 terms per year)
     const entrySequence = (entryYear * 2) + (entryIsSpring ? 0 : 1);
     const targetSequence = (targetYear * 2) + (targetIsSpring ? 0 : 1);
   
-    // Calculate difference (1-based index: entry semester is 1st semester)
     const semesterNum = (targetSequence - entrySequence) + 1;
   
-    if (semesterNum <= 0) return currentSemName; // Fallback for edge cases/exemption data
+    if (semesterNum <= 0) return currentSemName; 
   
-    // Append ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
     const suffixes = ["th", "st", "nd", "rd"];
     const v = semesterNum % 100;
     const suffix = suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
@@ -562,26 +605,45 @@ export default function DashboardPage() {
   const parseSessionFromReg = (reg: string) => {
     if (!reg) return "N/A";
     const cleanReg = reg.trim().toUpperCase();
-    
-    // Extract the first character (S or F) and the next two digits
     const match = cleanReg.match(/^(S|F)(\d{2})/);
     if (!match) return "N/A";
-  
     const semesterType = match[1] === "S" ? "Spring" : match[1] === "F" ? "Fall" : "Unknown";
     const year = `20${match[2]}`;
-  
     return `${semesterType} ${year}`;
   };
 
- const handleExpandResult = async (reg: string, studentId: number) => {
-    if (expandedReg === reg) {
+ const handleExpandResult = async (reg: string, studentId: number, forcePro = false) => {
+    if (expandedReg === reg && !forcePro) {
       setExpandedReg(null);
       return;
     }
+
+    const isPro = forcePro || isProMode;
+    const isUnlocked = unlockedRegs.has(reg);
+
+    if (!isAdmin && !isUnlocked) {
+      if (!isPro && freeAttempts <= 0) {
+        showToast("Out of Attempts", "Redirecting to wallet to top up.", "error");
+        setActiveTab('credits');
+        return;
+      }
+
+      if (isPro) {
+        await supabase.rpc('deduct_credits', { p_user_reg: currentUser.reg, p_cost: SEARCH_COST });
+        setCredits(p => p - SEARCH_COST);
+        logSearch(reg, "Paid Search");
+      } else {
+        await supabase.rpc('deduct_free_attempt', { p_user_reg: currentUser.reg });
+        setFreeAttempts(p => p - 1);
+        logSearch(reg, "Free Search");
+      }
+      setUnlockedRegs(prev => new Set(prev).add(reg));
+    }
+
     setExpandedReg(reg);
 
     try {
-      const columns = (isAdmin || useCredits)
+      const columns = isPro
         ? "id, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester"
         : "id, mid_term_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester";
 
@@ -593,15 +655,11 @@ export default function DashboardPage() {
         return;
       }
 
-      // 1. DYNAMIC FIX: Extract semester directly from the student's section name string
       const studentCard = searchResults?.find(s => s.id === studentId);
-      const rawSection = studentCard?.section || "General Data"; // e.g., "BSACCF-8TH-1M"
-      
-      // Use regex to find the number before "TH", "RD", "ND", "ST" in the section name
+      const rawSection = studentCard?.section || "General Data";
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
       const calculatedSemester = semMatch ? `Semester ${semMatch[1]}` : "General Data";
 
-      // 2. Deduplicate subjects: keep only the record with the highest total_marks
       const uniqueCourses = new Map();
       records.forEach((rec: any) => {
         const sem = rec.semester || calculatedSemester;
@@ -614,17 +672,15 @@ export default function DashboardPage() {
         }
       });
 
-      // 3. Helper to accurately round to next whole number (e.g. 2.5 -> 3)
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
 
-      // 4. Group the subjects under the correct semester banner
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
         const sem = rec.semester || calculatedSemester;
         
         if (!acc[sem]) acc[sem] = [];
         
-        const totalMarks = (isAdmin || useCredits) ? roundMark(rec.total_marks) : null;
-        const gradeInfo = (isAdmin || useCredits) ? getGradeInfo(totalMarks) : { gp: 0, grade: '🔒' };
+        const totalMarks = isPro ? roundMark(rec.total_marks) : null;
+        const gradeInfo = isPro ? getGradeInfo(totalMarks) : { gp: 0, grade: '🔒' };
         const credits = Number(rec.subject_id?.credit_hours) || 3;
 
         acc[sem].push({
@@ -632,10 +688,10 @@ export default function DashboardPage() {
           name: rec.subject_id?.course_name || "Unknown",
           credits: credits,
           mid: roundMark(rec.mid_term_marks),
-          sess: roundMark(rec.sessional_marks),
-          fin: roundMark(rec.end_term_marks),
-          prSess: roundMark(rec.practical_sessional_marks),
-          prFin: roundMark(rec.practical_final_marks),
+          sess: isPro ? roundMark(rec.sessional_marks) : null,
+          fin: isPro ? roundMark(rec.end_term_marks) : null,
+          prSess: isPro ? roundMark(rec.practical_sessional_marks) : null,
+          prFin: isPro ? roundMark(rec.practical_final_marks) : null,
           tot: totalMarks,
           gp: gradeInfo.gp,
           grade: gradeInfo.grade
@@ -643,7 +699,6 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      // 5. Sort semesters descending (latest first), strip the text, and calculate SGPA
       const sortedSemesters = Object.keys(grouped).sort((a, b) => {
         const numA = parseInt(a.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.replace(/\D/g, '')) || 0;
@@ -654,14 +709,14 @@ export default function DashboardPage() {
         let totalCr = 0;
         let semTotalMarks = 0;
         let semMaxMarks = 0;
-        let canCalculate = (isAdmin || useCredits);
+        let canCalculate = isPro;
 
         courses.forEach((c: any) => {
            if (canCalculate && c.tot !== null) {
              totalQualityPoints += (c.gp * c.credits);
              totalCr += c.credits;
              semTotalMarks += c.tot;
-             semMaxMarks += 100; // Standardize out of 100 per course
+             semMaxMarks += 100;
            } else if (!canCalculate) {
              totalCr += c.credits;
            }
@@ -674,7 +729,8 @@ export default function DashboardPage() {
           courses: courses,
           sgpa: sgpa,
           totalMarks: canCalculate ? semTotalMarks : "🔒",
-          maxMarks: canCalculate ? semMaxMarks : "🔒"
+          maxMarks: canCalculate ? semMaxMarks : "🔒",
+          canCalculate
         };
       });
 
@@ -716,7 +772,7 @@ export default function DashboardPage() {
       });
       showToast("Success", "Payment submitted for approval!", "info");
       setPaymentForm({ package: "", amount: "", name: "", tid: "" });
-      loadCreditsHistory();
+      loadCreditsHistory(1);
     } catch(e) {
       showToast("Error", "Submission failed", "error");
     }
@@ -770,16 +826,10 @@ export default function DashboardPage() {
 
           {!isAdmin && (
             <>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
-                  Pro Mode
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded border opacity-70 border-slate-500/30">
+                <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase">
+                  {isProMode ? 'Pro Mode' : 'Free Mode'}
                 </span>
-                <button 
-                  onClick={() => setUseCredits(!useCredits)}
-                  className={`w-9 h-5 sm:w-10 sm:h-5 rounded-full p-0.5 transition-colors duration-300 ease-in-out ${useCredits ? (theme==='light'?'bg-[#0056b3]':'bg-amber-500') : 'bg-slate-400/40'}`}
-                >
-                  <motion.div animate={{ x: useCredits ? (typeof window !== 'undefined' && window.innerWidth < 640 ? 16 : 20) : 0 }} className="bg-white w-4 h-4 sm:w-4 sm:h-4 rounded-full shadow-sm"/>
-                </button>
               </div>
 
               <button 
@@ -872,6 +922,22 @@ export default function DashboardPage() {
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-5 py-6 z-10">
         
+        {/* PWA Banner */}
+        {deferredPrompt && activeTab === 'home' && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className={`mb-6 p-4 rounded-[1.2rem] border shadow-lg flex flex-col sm:flex-row justify-between items-center gap-4 ${theme === 'light' ? 'bg-gradient-to-r from-[#0056b3] to-blue-500 text-white border-blue-400' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-900 border-amber-400'}`}>
+             <div className="flex items-center gap-3">
+               <Download size={24} className="animate-bounce" />
+               <div>
+                 <h3 className="font-black text-base leading-tight">Install IUB Portal App</h3>
+                 <p className="text-xs opacity-90">Get one-tap access directly from your home screen.</p>
+               </div>
+             </div>
+             <button onClick={installPWA} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider shadow-md active:scale-95 transition-all ${theme === 'light' ? 'bg-white text-[#0056b3] hover:bg-slate-100' : 'bg-[#00122a] text-amber-500 hover:bg-slate-900'}`}>
+               Install Now
+             </button>
+          </motion.div>
+        )}
+
         {/* TAB: ADMIN APPROVALS PAGE */}
         {isAdmin && activeTab === "approvals" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -946,26 +1012,42 @@ export default function DashboardPage() {
         {isAdmin && activeTab === "admin_chats" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex flex-col h-[75vh] ${t.cardBg} border ${t.border} rounded-2xl overflow-hidden`}>
             {!activeAdminChatUser ? (
-              <div className="p-5 overflow-y-auto">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><MessageSquare/> User Messages</h3>
-                {adminChatList.length === 0 && <p className="opacity-50">No messages yet.</p>}
-                {adminChatList.map((u) => (
-                  <div key={u.reg} onClick={() => loadAdminSingleChat(u.reg)} className={`flex justify-between items-center p-4 border ${t.border} rounded-xl mb-2 cursor-pointer transition-colors ${t.rowHover}`}>
-                    <div>
-                      <p className="font-bold mb-0.5">{u.name}</p>
-                      <p className={`text-[11px] font-mono font-semibold ${t.primary}`}>{u.reg}</p>
+              <div className="flex flex-col h-full">
+                <div className="p-4 border-b border-slate-500/10">
+                  <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><MessageSquare/> User Messages</h3>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className={`absolute left-3 top-2.5 ${t.textMuted}`} size={16} />
+                      <input type="text" placeholder="Search Reg or Email..." value={chatSearchQuery} onChange={e => setChatSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchAdminChatUser()} className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2 pl-9 pr-3 focus:outline-none ${t.inputFocus} text-sm`} />
                     </div>
-                    {u.unread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{u.unread} New</span>}
+                    <button onClick={searchAdminChatUser} className={`${t.btnPrimary} px-4 rounded-xl text-xs font-bold`}>Find</button>
                   </div>
-                ))}
+                </div>
+                <div className="p-2 overflow-y-auto flex-1">
+                  {adminChatList.filter(u => u.reg.toLowerCase().includes(chatSearchQuery.toLowerCase()) || u.name.toLowerCase().includes(chatSearchQuery.toLowerCase())).length === 0 && <p className="opacity-50 p-3 text-center">No messages matching query.</p>}
+                  {adminChatList.filter(u => u.reg.toLowerCase().includes(chatSearchQuery.toLowerCase()) || u.name.toLowerCase().includes(chatSearchQuery.toLowerCase())).map((u) => (
+                    <div key={u.reg} onClick={() => loadAdminSingleChat(u.reg)} className={`flex justify-between items-center p-4 border ${t.border} rounded-xl mb-2 cursor-pointer transition-colors ${t.rowHover}`}>
+                      <div>
+                        <p className="font-bold mb-0.5">{u.name}</p>
+                        <p className={`text-[11px] font-mono font-semibold ${t.primary}`}>{u.reg}</p>
+                      </div>
+                      {u.unread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{u.unread} New</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="flex flex-col h-full">
                 <div className={`p-4 border-b ${t.border} flex justify-between items-center bg-slate-500/5`}>
-                  <div>
-                    <span className="font-bold">{activeAdminChatUser}</span>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-sm">{activeAdminChatUser}</span>
                   </div>
-                  <button onClick={() => { setActiveAdminChatUser(null); loadAdminChatList(); }} className="font-bold underline opacity-70 hover:opacity-100">Back to List</button>
+                  <div className="flex items-center gap-3">
+                    <button onClick={handleAdminDeleteEntireChat} className="text-red-500 p-1.5 rounded-md hover:bg-red-500/10 transition-colors" title="Delete Entire Chat">
+                      <Trash2 size={16}/>
+                    </button>
+                    <button onClick={() => { setActiveAdminChatUser(null); loadAdminChatList(); }} className="font-bold text-sm underline opacity-70 hover:opacity-100">Back</button>
+                  </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3" ref={chatScrollRef}>
@@ -973,7 +1055,7 @@ export default function DashboardPage() {
                     const isMe = msg.sender_reg === currentUser.reg;
                     return (
                       <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                        <div className={`max-w-[75%] p-3 rounded-2xl ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
+                        <div className={`max-w-[75%] p-3 rounded-2xl break-words whitespace-pre-wrap ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
                           {msg.content}
                         </div>
                         <div className="flex items-center gap-2 mt-1 px-1">
@@ -992,7 +1074,7 @@ export default function DashboardPage() {
                 </div>
                 
                 <div className={`p-3 border-t ${t.border} flex items-center gap-2 bg-slate-500/5`}>
-                  <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSendMessage()} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2.5 focus:outline-none ${t.inputFocus}`} />
+                  <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2.5 focus:outline-none ${t.inputFocus} resize-none max-h-32 min-h-[44px]`} rows={1} />
                   <button onClick={handleSendMessage} disabled={!chatInput.trim()} className={`${t.btnPrimary} p-2.5 rounded-xl disabled:opacity-50 transition-transform active:scale-95`}><Send size={18}/></button>
                 </div>
               </div>
@@ -1014,7 +1096,7 @@ export default function DashboardPage() {
                 const isMe = msg.sender_reg === currentUser.reg;
                 return (
                   <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                    <div className={`max-w-[75%] p-3 rounded-2xl ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
+                    <div className={`max-w-[75%] p-3 rounded-2xl break-words whitespace-pre-wrap ${isMe ? t.btnPrimary + ' rounded-br-sm' : 'bg-slate-500/10 rounded-bl-sm border ' + t.border}`}>
                       {msg.content}
                     </div>
                     <div className="flex items-center gap-2 mt-1 px-1">
@@ -1032,7 +1114,7 @@ export default function DashboardPage() {
             </div>
             
             <div className={`p-3 border-t ${t.border} flex items-center gap-2 bg-slate-500/5`}>
-              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSendMessage()} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2.5 focus:outline-none ${t.inputFocus}`} />
+              <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key==='Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())} placeholder="Type a message..." className={`flex-1 ${t.inputBg} border ${t.border} rounded-xl px-4 py-2.5 focus:outline-none ${t.inputFocus} resize-none max-h-32 min-h-[44px]`} rows={1} />
               <button onClick={handleSendMessage} disabled={!chatInput.trim()} className={`${t.btnPrimary} p-2.5 rounded-xl disabled:opacity-50 transition-transform active:scale-95`}><Send size={18}/></button>
             </div>
           </motion.div>
@@ -1114,8 +1196,7 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Free attempts limit CTA block */}
-                {!isAdmin && (credits <= 0 || (freeAttempts <= 0 && !useCredits)) && (
+                {!isAdmin && !isProMode && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }} 
                     animate={{ opacity: 1, y: 0 }} 
@@ -1127,14 +1208,14 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <p className="font-bold text-sm">Detailed Marks are Locked</p>
-                        <p className="text-[11px] opacity-80">You have 0 credits remaining. Upgrade your plan to look up full mid, sessional, and final marks.</p>
+                        <p className="text-[11px] opacity-80">Your balance is 0. Upgrade plan to unlock full mid, sessional, and final marks.</p>
                       </div>
                     </div>
                     <button 
                       onClick={() => setActiveTab('credits')} 
                       className="w-full sm:w-auto text-center font-black text-xs uppercase tracking-wider px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-[#00122a] rounded-xl shadow-lg shadow-amber-500/10 active:scale-[0.98] transition-all transform whitespace-nowrap"
                     >
-                      Buy Credits to View All &rarr;
+                      Top Up Wallet &rarr;
                     </button>
                   </motion.div>
                 )}
@@ -1144,7 +1225,6 @@ export default function DashboardPage() {
             <div className={`${t.cardBg} border ${t.border} p-4 sm:p-6 rounded-2xl mb-6 transition-all`}>
               <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-4">
                 
-                {/* UPGRADED SEARCH TOGGLE UI */}
                 <div className="flex flex-col items-center mb-3">
                   <span className="text-[11px] font-bold uppercase tracking-widest opacity-50 mb-2">Search By</span>
                   <div className={`flex p-1 rounded-xl w-full max-w-[300px] relative ${theme==='light'?'bg-slate-100 border border-slate-200 shadow-inner':'bg-[#00122a] border border-[#00348c]/30'}`}>
@@ -1283,17 +1363,16 @@ export default function DashboardPage() {
                                             <tr key={cIdx} className={t.rowHover}>
                                               <td className="px-2 py-2 max-w-[120px] sm:max-w-[180px] truncate" title={course.name}>
                                                 <span className="font-semibold block">{course.name}</span>
-                                                {/* Credit hours shifted here right after course code */}
                                                 <span className="block text-[10px] opacity-70 font-mono mt-0.5">
                                                   {course.code} • {course.credits}
                                                 </span>
                                               </td>
                                               <td className="px-2 py-2 text-center font-mono">{course.mid ?? "-"}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.sess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.fin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prSess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prFin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? t.primary : ''}`}>{(isAdmin || useCredits) ? (course.tot ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{sem.canCalculate ? (course.sess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{sem.canCalculate ? (course.fin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{sem.canCalculate ? (course.prSess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className="px-2 py-2 text-center font-mono">{sem.canCalculate ? (course.prFin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
+                                              <td className={`px-2 py-2 text-center font-mono font-bold ${sem.canCalculate ? t.primary : ''}`}>{sem.canCalculate ? (course.tot ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -1314,6 +1393,26 @@ export default function DashboardPage() {
                                     </div>
                                   </div>
                                 ))}
+
+                                {/* Upsell Lock Button for Free mode users */}
+                                {!studentDetails[0]?.canCalculate && (
+                                   <motion.button 
+                                     onClick={(e) => {
+                                        e.stopPropagation();
+                                        if(credits >= SEARCH_COST) {
+                                            handleExpandResult(student.reg, student.id, true);
+                                        } else {
+                                            setActiveTab('credits');
+                                        }
+                                     }}
+                                     initial={{ scale: 0.95, opacity: 0 }}
+                                     animate={{ scale: 1, opacity: 1 }}
+                                     className={`mt-2 w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-black text-sm uppercase tracking-wide transition-all shadow-md active:scale-95 ${theme === 'light' ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 border-amber-300' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-[#00122a] border-amber-400 hover:from-amber-400 hover:to-amber-500'}`}
+                                   >
+                                      <Unlock size={18} />
+                                      {credits >= SEARCH_COST ? `See Full Result (${SEARCH_COST} Credits)` : `Unlock Full Result (Top Up)`}
+                                   </motion.button>
+                                )}
                               </>
                             )}
                           </div>
@@ -1429,6 +1528,15 @@ export default function DashboardPage() {
                    </tbody>
                  </table>
                </div>
+               
+               {/* Load More Button */}
+               {(historyLogs.deposits.length + historyLogs.usage.length) >= (7 + (walletPage - 1) * 10) && (
+                  <div className="p-3 border-t border-slate-500/10 bg-slate-500/5 flex justify-center">
+                    <button onClick={() => loadCreditsHistory(walletPage + 1)} disabled={creditsTabLoading} className={`text-xs font-bold px-4 py-2 rounded-lg border ${t.border} bg-transparent hover:bg-slate-500/10 transition-colors`}>
+                      Load More
+                    </button>
+                  </div>
+               )}
             </div>
           </motion.div>
         )}
