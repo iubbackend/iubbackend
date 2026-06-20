@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr'; // ✅ Upgraded to SSR client
-import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft } from 'lucide-react';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
+import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2 } from 'lucide-react';
 
 // --- NATIVE BROWSER HASHING HELPER ---
-// Converts a plain text password into a secure SHA-256 hash string
 async function hashPassword(password: string) {
   const msgBuffer = new TextEncoder().encode(password);
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
@@ -16,11 +15,13 @@ async function hashPassword(password: string) {
 
 type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email';
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  // State for View Management
+  // View & Referral Lock management
   const [view, setView] = useState<ViewState>('login');
+  const [referralCode, setReferralCode] = useState<string | null>(null);
   
   // Form States
   const [rollNumber, setRollNumber] = useState('');
@@ -34,19 +35,43 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // --- SAFE SUPABASE INITIALIZATION ---
-  // ✅ Uses createBrowserClient so authentication sessions are stored in cookies for the middleware
   const getSupabase = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
     return createBrowserClient(supabaseUrl, supabaseKey);
   };
 
-  // --- DARK MODE LOGIC ---
+  // --- AUTOMATED REFERRAL EXTRACTOR & TRACKER ---
   useEffect(() => {
+    // 1. Check URL parameters (e.g., /login?ref=F20BSCS1M010)
+    let ref = searchParams.get('ref');
+
+    // 2. Fallback check path mapping if routing structural logic uses /ref/REG structure directly
+    if (!ref && typeof window !== 'undefined') {
+      const pathParts = window.location.pathname.split('/');
+      const refIdx = pathParts.indexOf('ref');
+      if (refIdx !== -1 && pathParts[refIdx + 1]) {
+        ref = pathParts[refIdx + 1];
+      }
+    }
+
+    if (ref) {
+      const cleanRef = ref.trim().toUpperCase();
+      setReferralCode(cleanRef);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('referred_by', cleanRef);
+      }
+      // Instantly open to signup variant view dynamically
+      setView('signup');
+    } else if (typeof window !== 'undefined') {
+      // Look up previous local storage session tokens if present
+      const savedRef = localStorage.getItem('referred_by');
+      if (savedRef) setReferralCode(savedRef.toUpperCase());
+    }
+
     const isDark = document.documentElement.classList.contains('dark');
     setIsDarkMode(isDark);
-  }, []);
+  }, [searchParams]);
 
   const toggleTheme = () => {
     const htmlClass = document.documentElement.classList;
@@ -59,7 +84,6 @@ export default function LoginPage() {
     }
   };
 
-  // --- SHARED HELPERS ---
   const clearMessages = () => {
     setErrorMsg('');
     setSuccessMsg('');
@@ -70,7 +94,6 @@ export default function LoginPage() {
     clearMessages();
   };
 
-  // --- PHONE FORMATTER ---
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, ''); 
     if (value.length > 4) {
@@ -79,15 +102,12 @@ export default function LoginPage() {
     setPhone(value);
   };
 
-  // --- 1. LOGIN LOGIC ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
     setIsLoading(true);
 
     const supabase = getSupabase();
-    
-    // Hash the password before checking the database
     const hashedPassword = await hashPassword(password);
 
     try {
@@ -95,14 +115,12 @@ export default function LoginPage() {
         .from('users')
         .select('id, reg, email, phone')
         .eq('reg', rollNumber)
-        .eq('pass', hashedPassword) // Check against the hash
+        .eq('pass', hashedPassword)
         .single();
 
       if (error || !data) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
-        // --- Actual Supabase Auth Sign In ---
-        // Note: Supabase auth still expects the raw password to handle its own internal verification
         const { error: authError } = await supabase.auth.signInWithPassword({
           email: data.email, 
           password: password, 
@@ -112,8 +130,6 @@ export default function LoginPage() {
           setErrorMsg('Authentication error: ' + authError.message);
         } else {
           setSuccessMsg('Login successful! Welcome back.');
-          
-          // Small timeout gives the browser a split second to finish writing the cookie
           setTimeout(() => {
             window.location.href = '/dashboard';
           }, 500);
@@ -126,7 +142,6 @@ export default function LoginPage() {
     }
   };
 
-  // --- 2. SIGN UP LOGIC (UPDATED FOR OTP) ---
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
@@ -143,14 +158,12 @@ export default function LoginPage() {
 
     setIsLoading(true);
     const supabase = getSupabase();
-
-    // Hash the password before inserting into the custom table
     const hashedPassword = await hashPassword(password);
 
     try {
-      const { data, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email,
-        password: password, // Supabase Auth needs the raw text, it securely hashes it internally
+        password: password,
       });
 
       if (authError) {
@@ -161,13 +174,12 @@ export default function LoginPage() {
 
       const { error } = await supabase
         .from('users')
-        .insert([{ reg: rollNumber.toUpperCase(), phone, email, pass: hashedPassword }]); // Forced uppercase for strict DB matching
+        .insert([{ reg: rollNumber.toUpperCase(), phone, email, pass: hashedPassword }]);
 
       if (error) {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
         else setErrorMsg('Error creating account. Please try again.');
       } else {
-        // --- REFERRAL pipeline integration ---
         try {
           const savedReferral = typeof window !== "undefined" ? localStorage.getItem("referred_by") : null;
           
@@ -180,17 +192,18 @@ export default function LoginPage() {
               referred_by: savedReferral ? savedReferral.toUpperCase() : null
             }]);
 
-          // Clear the storage token so it doesn't fire on secondary signups
           if (typeof window !== "undefined") {
             localStorage.removeItem("referred_by");
           }
         } catch (creditErr) {
           console.error("Failed to initialize user wallet/referral:", creditErr);
-          // Non-blocking catch so the user doesn't get stuck if wallet row creation has an isolated issue
         }
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
-        setTimeout(() => switchView('login'), 3000);
+        setTimeout(() => {
+          setReferralCode(null);
+          switchView('login');
+        }, 3000);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
@@ -199,7 +212,6 @@ export default function LoginPage() {
     }
   };
 
-  // --- 3. FORGOT EMAIL LOGIC ---
   const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
@@ -232,7 +244,6 @@ export default function LoginPage() {
     }
   };
 
-  // --- 4. FORGOT PASSWORD (OTP) LOGIC ---
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
@@ -302,6 +313,17 @@ export default function LoginPage() {
             {view === 'forgot_email' && 'Enter your phone to reveal your email'}
           </p>
         </div>
+
+        {/* LOCKED REFERRAL SYSTEM MESSAGE BADGE */}
+        {view === 'signup' && referralCode && (
+          <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
+            <Share2 size={18} className="animate-pulse" />
+            <div className="text-left">
+              <p className="text-xs font-black uppercase tracking-wider">Referral Code Applied</p>
+              <p className="text-[11px] opacity-90">Invited by: <span className="font-mono font-bold">{referralCode}</span> (Locked)</p>
+            </div>
+          </div>
+        )}
 
         {errorMsg && (
           <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400 font-semibold">
@@ -414,7 +436,7 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* VIEW 3: FOR short PASSWORD */}
+        {/* VIEW 3: FORGOT PASSWORD */}
         {view === 'forgot_password' && (
           <form onSubmit={handleForgotPassword} className="space-y-5">
             <div>
@@ -461,5 +483,18 @@ export default function LoginPage() {
 
       </div>
     </div>
+  );
+}
+
+// Next.js static rendering protection for useSearchParams hook parsing
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
