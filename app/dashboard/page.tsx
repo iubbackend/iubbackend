@@ -1210,14 +1210,12 @@ export default function DashboardPage() {
                                         <thead className={`border-b ${t.border} text-opacity-80`}>
                                           <tr>
                                             <th className="px-2 py-2 font-bold">Sub</th>
-                                            <th className="px-2 py-2 text-center font-bold">CR</th>
                                             <th className="px-2 py-2 text-center font-bold">Mid</th>
                                             <th className="px-2 py-2 text-center font-bold">Sess</th>
                                             <th className="px-2 py-2 text-center font-bold">Fin</th>
                                             <th className="px-2 py-2 text-center font-bold">Pr.S</th>
                                             <th className="px-2 py-2 text-center font-bold">Pr.F</th>
                                             <th className="px-2 py-2 text-center font-bold">Tot</th>
-                                            <th className="px-2 py-2 text-center font-bold">Gr</th>
                                           </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 dark:divide-white/5">
@@ -1225,16 +1223,17 @@ export default function DashboardPage() {
                                             <tr key={cIdx} className={t.rowHover}>
                                               <td className="px-2 py-2 max-w-[120px] sm:max-w-[180px] truncate" title={course.name}>
                                                 <span className="font-semibold block">{course.name}</span>
-                                                <span className="block text-[10px] opacity-70 font-mono mt-0.5">{course.code}</span>
+                                                {/* Credit hours shifted here right after course code */}
+                                                <span className="block text-[10px] opacity-70 font-mono mt-0.5">
+                                                  {course.code} • {course.credits}
+                                                </span>
                                               </td>
-                                              <td className="px-2 py-2 text-center font-mono opacity-80">{course.credits}</td>
                                               <td className="px-2 py-2 text-center font-mono">{course.mid ?? "-"}</td>
                                               <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.sess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                               <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.fin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                               <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prSess ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                               <td className="px-2 py-2 text-center font-mono">{(isAdmin || useCredits) ? (course.prFin ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                               <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? t.primary : ''}`}>{(isAdmin || useCredits) ? (course.tot ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
-                                              <td className={`px-2 py-2 text-center font-mono font-bold ${(isAdmin || useCredits) ? (course.grade === 'F' ? 'text-red-400' : 'text-emerald-500') : ''}`}>{(isAdmin || useCredits) ? (course.grade ?? "-") : <Lock size={12} className="mx-auto opacity-50"/>}</td>
                                             </tr>
                                           ))}
                                         </tbody>
