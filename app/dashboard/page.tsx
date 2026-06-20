@@ -693,9 +693,9 @@ export default function DashboardPage() {
   };
 
   const packages = [
-    { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Basic' },
-    { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Pro', pop: true },
-    { id: 'pkg3', price: 'Rs 5000', amount: 5000, credits: 'Lifetime', label: 'Max (10/day)' },
+    { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Solo Student' },
+    { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Friends Plan', pop: true },
+    { id: 'pkg3', price: 'Rs 5000', amount: 5000, credits: '125000', label: 'CR/GR Plan)' },
     { id: 'custom', price: 'Custom', amount: 0, credits: 'Variable', label: 'Enter Amount' }
   ];
 
