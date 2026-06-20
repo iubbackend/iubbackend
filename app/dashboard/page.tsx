@@ -1462,7 +1462,7 @@ export default function DashboardPage() {
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className={`p-5 sm:p-6 rounded-[1.5rem] border ${t.border} ${t.cardBg} space-y-4 shadow-md`}>
                   <h4 className="font-bold">Complete Your Payment</h4>
                   <div className={`p-3 rounded-xl text-[12px] font-mono border ${t.border} bg-slate-500/5`}>
-                    <p className="opacity-70 mb-1.5">Transfer exact amount via EasyPaisa/JazzCash/Bank to:</p>
+                    <p className="opacity-70 mb-1.5">Transfer exact amount and fill details below:</p>
                     <p className={`font-bold text-base ${t.primary}`}>Easypaisa: 03119277832</p>
                     <p>Account Title: Sabil</p>
                   </div>
@@ -1481,7 +1481,7 @@ export default function DashboardPage() {
                       className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-3 px-4 focus:outline-none ${t.inputFocus}`} />
                   </div>
                   <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}>
-                    <CheckCircle2 size={18}/> Submit Payment Verification
+                    <CheckCircle2 size={18}/> I have Paid!
                   </button>
                 </motion.div>
               )}
