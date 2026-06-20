@@ -1,12 +1,23 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import PWARegistration from "@/components/PWARegistration";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "IUB Result Portal",
   description: "A premium, lightning-fast academic tracking platform.",
+  manifest: "/manifest.json", // Links your web app install configuration
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "IUB Portal",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#00122a",
 };
 
 export default function RootLayout({
@@ -19,6 +30,9 @@ export default function RootLayout({
       <body 
         className={`${inter.className} bg-slate-950 text-slate-50 antialiased min-h-screen relative overflow-x-hidden`}
       >
+        {/* Background background process to install the service worker */}
+        <PWARegistration />
+
         {/* Universal Ambient Dynamic Lighting Grid */}
         <div className="pointer-events-none fixed inset-0 z-0">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.03),transparent_50%)]" />
