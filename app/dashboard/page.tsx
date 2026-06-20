@@ -1176,7 +1176,9 @@ export default function DashboardPage() {
                           <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono font-semibold ${theme === 'light' ? 'bg-slate-100 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>{student.reg}</span>
                           <h3 className="font-bold">{student.name}</h3>
                         </div>
-                        <div className={`text-[12px] ${t.textMuted} font-medium`}>{student.session} • {student.section}</div>
+                        <div className={`text-[12px] ${t.textMuted} font-medium`}>
+                          {student.session} • {student.section?.replace(/[- ]?\d+(st|nd|rd|th)[- ]?/i, ' • ')}
+                        </div>
                       </div>
                       <button className={`p-1.5 rounded-full ${t.textMuted} hover:${t.primary} bg-slate-500/5 transition-colors`}>
                         <motion.div
