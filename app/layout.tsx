@@ -8,12 +8,7 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "IUB Result Portal",
   description: "A premium, lightning-fast academic tracking platform.",
-  manifest: "/manifest.json", // Links your web app install configuration
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-    title: "IUB Portal",
-  },
+  manifest: "/manifest.json", // <-- Must start with a forward slash
 };
 
 export const viewport: Viewport = {
