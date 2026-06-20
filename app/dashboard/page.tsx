@@ -772,7 +772,7 @@ export default function DashboardPage() {
             <>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase opacity-70">
-                  Use Credits
+                  Pro Mode
                 </span>
                 <button 
                   onClick={() => setUseCredits(!useCredits)}
