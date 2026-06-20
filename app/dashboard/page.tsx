@@ -1115,16 +1115,26 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Free attempts limit CTA block */}
-                {(freeAttempts <= 0) && !useCredits && !isAdmin && (
-                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} 
-                    className="mt-5 bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 p-3 sm:p-4 rounded-xl font-medium flex flex-col sm:flex-row items-center justify-between gap-3 shadow-inner"
+                {!isAdmin && (credits <= 0 || (freeAttempts <= 0 && !useCredits)) && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="mt-5 bg-gradient-to-r from-red-500/10 to-amber-500/10 text-slate-800 dark:text-blue-200 border border-amber-500/30 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md backdrop-blur-sm"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-1.5 bg-amber-500/20 rounded-full"><Lock size={16}/></div>
-                      <span className="leading-snug text-[12px] sm:text-[13px]">Your free attempts for today have ended. Buy credits to execute searches without limits.</span>
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-amber-500/20 rounded-xl text-amber-500">
+                        <Lock size={18} className="animate-pulse" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm">Detailed Marks are Locked</p>
+                        <p className="text-[11px] opacity-80">You have 0 credits remaining. Upgrade your plan to look up full mid, sessional, and final marks.</p>
+                      </div>
                     </div>
-                    <button onClick={() => setActiveTab('credits')} className={`${theme==='light' ? 'bg-[#001c4d] text-amber-400' : 'bg-amber-500 text-[#00122a]'} px-5 py-2 rounded-lg font-bold whitespace-nowrap shadow-md active:scale-95 transition-transform`}>
-                      Buy Credits
+                    <button 
+                      onClick={() => setActiveTab('credits')} 
+                      className="w-full sm:w-auto text-center font-black text-xs uppercase tracking-wider px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-[#00122a] rounded-xl shadow-lg shadow-amber-500/10 active:scale-[0.98] transition-all transform whitespace-nowrap"
+                    >
+                      Buy Credits to View All &rarr;
                     </button>
                   </motion.div>
                 )}
