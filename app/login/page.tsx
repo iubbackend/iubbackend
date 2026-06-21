@@ -269,10 +269,11 @@ function LoginContent() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('email')
-        .ilike('phone', targetPhone)
+        .select('id, reg, email, phone')
+        .ilike('reg', cleanRollNumber)
+        .eq('pass', hashedPassword) // <--- Change .ilike to .eq here
         .maybeSingle();
-
+      
       if (error || !data) {
         setErrorMsg('No account found with this phone number.');
       } else {
