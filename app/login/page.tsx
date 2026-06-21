@@ -69,7 +69,7 @@ function LoginContent() {
     setIsDarkMode(isDark);
   }, [searchParams]);
 
-  // STABLE COLOR MODE PERSISTENCE UPGRADE
+  // COLOR MODE PERSISTENCE
   useEffect(() => {
     const savedTheme = localStorage.getItem("iub_theme");
     if (savedTheme === "light") {
@@ -112,7 +112,6 @@ function LoginContent() {
     setPhone(value);
   };
 
-  // CLEAN MASKING CORE HOOK (Shows 2 starting, 2 ending letters of the mail name)
   const maskEmailString = (rawEmail: string) => {
     if (!rawEmail) return "";
     const parts = rawEmail.split("@");
@@ -129,52 +128,43 @@ function LoginContent() {
 
     const supabase = getSupabase();
     const hashedPassword = await hashPassword(password);
-    const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-    setIsLoading(true);
-
-    const supabase = getSupabase();
-    const hashedPassword = await hashPassword(password);
-    
-    // Explicitly trim out any trailing spaces or tabs from input
     const cleanRollNumber = rollNumber.trim().toUpperCase();
 
-      try {
-        // Use ilike for a loose structural match to handle variable whitespaces
-        const { data, error } = await supabase
-          .from('users')
-          .select('id, reg, email, phone')
-          .ilike('reg', cleanRollNumber)
-          .ilike('pass', hashedPassword)
-          .maybeSingle();
-  
-        if (error || !data) {
-          setErrorMsg('Invalid Roll Number or Password.');
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, reg, email, phone')
+        .ilike('reg', cleanRollNumber)
+        .ilike('pass', hashedPassword)
+        .maybeSingle();
+
+      if (error || !data) {
+        setErrorMsg('Invalid Roll Number or Password.');
+      } else {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: data.email.toLowerCase().trim(), 
+          password: password, 
+        });
+
+        if (authError) {
+          setErrorMsg('Authentication error: ' + authError.message);
         } else {
-          const { error: authError } = await supabase.auth.signInWithPassword({
-            email: data.email.toLowerCase().trim(), 
-            password: password, 
-          });
-  
-          if (authError) {
-            setErrorMsg('Authentication error: ' + authError.message);
-          } else {
-            const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
-            localStorage.setItem("iub_currentUser", JSON.stringify(userState));
-            
-            setSuccessMsg('Login successful! Welcome back.');
-            setTimeout(() => {
-              window.location.href = '/dashboard';
-            }, 500);
-          }
+          const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
+          localStorage.setItem("iub_currentUser", JSON.stringify(userState));
+          
+          setSuccessMsg('Login successful! Welcome back.');
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 500);
         }
-      } catch (err) {
-        setErrorMsg('An unexpected error occurred.');
-      } finally {
-        setIsLoading(false);
       }
-    };
+    } catch (err) {
+      setErrorMsg('An unexpected error occurred.');
+    } locate {
+      setIsLoading(false);
+    }
+  };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
@@ -262,7 +252,6 @@ function LoginContent() {
     const supabase = getSupabase();
 
     try {
-      // ilike matching safeguards against string variants across tables
       const { data, error } = await supabase
         .from('users')
         .select('email')
@@ -272,7 +261,6 @@ function LoginContent() {
       if (error || !data) {
         setErrorMsg('No account found with this phone number.');
       } else {
-        // STRICT REQUIREMENT MET: Encapsulate using masked layout
         setSuccessMsg(`Your registered email is: ${maskEmailString(data.email)}`);
       }
     } catch (err) {
@@ -324,6 +312,7 @@ function LoginContent() {
       
       <button
         onClick={toggleTheme}
+        type="button"
         className="absolute top-6 right-6 p-2 rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
       >
         {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
@@ -335,6 +324,7 @@ function LoginContent() {
           {view !== 'login' && (
             <button 
               onClick={() => switchView(view === 'forgot_email' ? 'forgot_password' : 'login')}
+              type="button"
               className="absolute left-0 top-1 text-gray-500 hover:text-gray-900 dark:hover:text-white"
             >
               <ArrowLeft size={24} />
