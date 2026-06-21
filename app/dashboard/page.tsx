@@ -113,11 +113,34 @@ export default function DashboardPage() {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [adminChatList, setAdminChatList] = useState<{reg: string, name: string, unread: number, last_msg_time: string}[]>([]);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [activeAdminChatUser, setActiveAdminChatUser] = useState<string | null>(null);
+  const [activeAdminChatUser, setActiveAdminChatUser] = useState<{reg: string, name: string} | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // PWA STATE
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  // CACHED INITIALIZATION & THEME
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("iub_theme") as Theme;
+    if (savedTheme) setTheme(savedTheme);
+
+    const cachedUser = localStorage.getItem("iub_currentUser");
+    if (cachedUser) setCurrentUser(JSON.parse(cachedUser));
+
+    const cachedCredits = localStorage.getItem("iub_credits");
+    if (cachedCredits) setCredits(Number(cachedCredits));
+
+    const cachedAttempts = localStorage.getItem("iub_freeAttempts");
+    if (cachedAttempts) setFreeAttempts(Number(cachedAttempts));
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const nextTheme = prev === "light" ? "dark" : "light";
+      localStorage.setItem("iub_theme", nextTheme);
+      return nextTheme;
+    });
+  };
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -135,6 +158,16 @@ export default function DashboardPage() {
       if (outcome === 'accepted') setDeferredPrompt(null);
     }
   };
+
+  // STRICT AUTH STATE OBSERVER
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED' || !session) {
+        router.push('/login');
+      }
+    });
+    return () => { authListener.subscription.unsubscribe(); };
+  }, [router]);
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -164,20 +197,26 @@ export default function DashboardPage() {
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
 
-        setCurrentUser({ reg: actualReg, name: actualName, phone: userRecord?.phone || "", email: userRecord?.email || "" });
+        const newUserState = { reg: actualReg, name: actualName, phone: userRecord?.phone || "", email: userRecord?.email || "" };
+        setCurrentUser(newUserState);
+        localStorage.setItem("iub_currentUser", JSON.stringify(newUserState));
 
         if (actualReg !== "UNKNOWN") {
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
           if (userCreditsRes) {
             setCredits(userCreditsRes.credits || 0);
-            setFreeAttempts(Math.max(0, 4 - (userCreditsRes.free_searches_today || 0)));
+            localStorage.setItem("iub_credits", (userCreditsRes.credits || 0).toString());
+            
+            const attempts = Math.max(0, 4 - (userCreditsRes.free_searches_today || 0));
+            setFreeAttempts(attempts);
+            localStorage.setItem("iub_freeAttempts", attempts.toString());
           }
           
-          // Realtime Credits Update Subscription
           if (actualReg !== ADMIN_REG) {
              const channel = supabase.channel('credits_update')
                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_credits', filter: `user_reg=eq.${actualReg}` }, (payload) => {
                   setCredits(payload.new.credits);
+                  localStorage.setItem("iub_credits", payload.new.credits.toString());
                   setFreeAttempts(Math.max(0, 4 - (payload.new.free_searches_today || 0)));
                }).subscribe();
           }
@@ -211,6 +250,54 @@ export default function DashboardPage() {
     
     fetchInitialData();
   }, [router]);
+
+  // REALTIME CHAT SYNC
+  useEffect(() => {
+    if (!currentUser.reg) return;
+
+    const channel = supabase.channel('messages_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const newMsg = payload.new as ChatMessage;
+        
+        const isActiveChat = isAdmin 
+          ? (activeAdminChatUser && ((newMsg.sender_reg === activeAdminChatUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === activeAdminChatUser.reg)))
+          : ((newMsg.sender_reg === currentUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === currentUser.reg));
+
+        if (isActiveChat) {
+          setChatMessages(prev => {
+            if (prev.find(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          
+          if (newMsg.receiver_reg === currentUser.reg && !newMsg.is_read) {
+            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then();
+          }
+        } else if (newMsg.receiver_reg === currentUser.reg) {
+          setHasUnreadMessages(true);
+        }
+
+        if (isAdmin) loadAdminChatList();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
+        const updatedMsg = payload.new as ChatMessage;
+        setChatMessages(prev => prev.map(m => m.id === updatedMsg.id ? updatedMsg : m));
+        if (isAdmin) loadAdminChatList();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); }
+  }, [currentUser.reg, activeAdminChatUser, isAdmin]);
+
+  // REALTIME ADMIN REQUESTS SYNC
+  useEffect(() => {
+    if (isAdmin) {
+      const adminChannel = supabase.channel('admin_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'payments_record' }, () => {
+          loadRealAdminData();
+        }).subscribe();
+      return () => { supabase.removeChannel(adminChannel); }
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     if (activeTab === "credits") loadCreditsHistory(1);
@@ -348,7 +435,6 @@ export default function DashboardPage() {
     try {
       const { data } = await supabase.rpc('get_admin_chat_list'); 
       if (data) {
-        // Sort by last message time descending (WhatsApp style)
         const sorted = data.sort((a: any, b: any) => new Date(b.last_msg_time).getTime() - new Date(a.last_msg_time).getTime());
         setAdminChatList(sorted);
         const totalUnread = sorted.reduce((sum: number, u: any) => sum + u.unread, 0);
@@ -357,8 +443,8 @@ export default function DashboardPage() {
     } catch(e) {}
   };
 
-  const loadAdminSingleChat = async (reg: string) => {
-    setActiveAdminChatUser(reg);
+  const loadAdminSingleChat = async (reg: string, name: string) => {
+    setActiveAdminChatUser({ reg, name });
     try {
       const { data } = await supabase.from('messages').select('*')
         .or(`and(sender_reg.eq.${reg},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${reg})`)
@@ -372,7 +458,7 @@ export default function DashboardPage() {
   const handleSendMessage = async () => {
     if (!chatInput.trim()) return;
     try {
-      const receiver = isAdmin ? activeAdminChatUser : ADMIN_REG;
+      const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
       if (!receiver) return;
 
       if (editingMsgId) {
@@ -388,25 +474,34 @@ export default function DashboardPage() {
         });
       }
       setChatInput("");
-      isAdmin ? loadAdminSingleChat(receiver) : loadUserChat();
     } catch(e) {}
   };
 
   const handleDeleteMessage = async (id: string) => {
     try {
       await supabase.from('messages').delete().eq('id', id);
-      isAdmin && activeAdminChatUser ? loadAdminSingleChat(activeAdminChatUser) : loadUserChat();
+      setChatMessages(prev => prev.filter(m => m.id !== id));
+      isAdmin && activeAdminChatUser ? loadAdminSingleChat(activeAdminChatUser.reg, activeAdminChatUser.name) : loadUserChat();
     } catch(e) {}
   };
 
   const handleAdminDeleteEntireChat = async () => {
     if (!activeAdminChatUser) return;
     try {
-      await supabase.from('messages').delete().or(`and(sender_reg.eq.${activeAdminChatUser},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${activeAdminChatUser})`);
+      await supabase.from('messages').delete().or(`and(sender_reg.eq.${activeAdminChatUser.reg},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${activeAdminChatUser.reg})`);
       setActiveAdminChatUser(null);
       loadAdminChatList();
       showToast("Deleted", "Entire chat deleted.", "info");
     } catch (e) {}
+  };
+
+  const maskEmail = (email: string) => {
+    if (!email) return "Unknown";
+    const parts = email.split("@");
+    if (parts.length !== 2) return email;
+    const [name, domain] = parts;
+    if (name.length <= 4) return `${name.slice(0, 1)}***@${domain}`;
+    return `${name.slice(0, 2)}***${name.slice(-2)}@${domain}`;
   };
 
   const searchAdminChatUser = async () => {
@@ -414,7 +509,7 @@ export default function DashboardPage() {
     try {
       const { data } = await supabase.from('users').select('reg, email, phone').or(`reg.ilike.%${chatSearchQuery}%,email.ilike.%${chatSearchQuery}%`).limit(5);
       if (data && data.length > 0) {
-        const mapped = data.map(u => ({ reg: u.reg, name: u.email, unread: 0, last_msg_time: new Date().toISOString() }));
+        const mapped = data.map(u => ({ reg: u.reg, name: maskEmail(u.email), unread: 0, last_msg_time: new Date().toISOString() }));
         setAdminChatList(prev => {
           const combined = [...mapped, ...prev];
           const unique = Array.from(new Map(combined.map(item => [item.reg, item])).values());
@@ -751,7 +846,7 @@ export default function DashboardPage() {
   const packages = [
     { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Solo Student' },
     { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Friends Plan', pop: true },
-    { id: 'pkg3', price: 'Rs 5000', amount: 5000, credits: '125000', label: 'CR/GR Plan)' },
+    { id: 'pkg3', price: 'Rs 5000', amount: 5000, credits: '125,000', label: 'CR/GR Plan' },
     { id: 'custom', price: 'Custom', amount: 0, credits: 'Variable', label: 'Enter Amount' }
   ];
 
@@ -842,7 +937,7 @@ export default function DashboardPage() {
             </>
           )}
 
-          <button onClick={() => setTheme(prev => prev === "light" ? "dark" : "light")} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500 shadow-sm' : 'bg-[#001c4d] text-blue-300'}`}>
+          <button onClick={toggleTheme} className={`p-1.5 rounded-lg border ${t.border} ${theme === 'light' ? 'bg-white text-amber-500 shadow-sm' : 'bg-[#001c4d] text-blue-300'}`}>
             {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
           </button>
         </div>
@@ -1026,7 +1121,7 @@ export default function DashboardPage() {
                 <div className="p-2 overflow-y-auto flex-1">
                   {adminChatList.filter(u => u.reg.toLowerCase().includes(chatSearchQuery.toLowerCase()) || u.name.toLowerCase().includes(chatSearchQuery.toLowerCase())).length === 0 && <p className="opacity-50 p-3 text-center">No messages matching query.</p>}
                   {adminChatList.filter(u => u.reg.toLowerCase().includes(chatSearchQuery.toLowerCase()) || u.name.toLowerCase().includes(chatSearchQuery.toLowerCase())).map((u) => (
-                    <div key={u.reg} onClick={() => loadAdminSingleChat(u.reg)} className={`flex justify-between items-center p-4 border ${t.border} rounded-xl mb-2 cursor-pointer transition-colors ${t.rowHover}`}>
+                    <div key={u.reg} onClick={() => loadAdminSingleChat(u.reg, u.name)} className={`flex justify-between items-center p-4 border ${t.border} rounded-xl mb-2 cursor-pointer transition-colors ${t.rowHover}`}>
                       <div>
                         <p className="font-bold mb-0.5">{u.name}</p>
                         <p className={`text-[11px] font-mono font-semibold ${t.primary}`}>{u.reg}</p>
@@ -1040,7 +1135,8 @@ export default function DashboardPage() {
               <div className="flex flex-col h-full">
                 <div className={`p-4 border-b ${t.border} flex justify-between items-center bg-slate-500/5`}>
                   <div className="flex flex-col">
-                    <span className="font-bold text-sm">{activeAdminChatUser}</span>
+                    <span className="font-bold text-sm">{activeAdminChatUser.name}</span>
+                    <span className="text-[10px] font-mono opacity-70">{activeAdminChatUser.reg}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <button onClick={handleAdminDeleteEntireChat} className="text-red-500 p-1.5 rounded-md hover:bg-red-500/10 transition-colors" title="Delete Entire Chat">
