@@ -119,7 +119,7 @@ export default function DashboardPage() {
   // PWA STATE
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // CACHED INITIALIZATION & THEME
+  // PERSISTENT STRUCTURAL MOUNT LOGIC (Anti-Zero Loading Flash)
   useEffect(() => {
     const savedTheme = localStorage.getItem("iub_theme") as Theme;
     if (savedTheme) setTheme(savedTheme);
@@ -159,10 +159,13 @@ export default function DashboardPage() {
     }
   };
 
-  // STRICT AUTH STATE OBSERVER
+  // STRICT FORCE-DROPOUT INTERCEPTOR
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
+        localStorage.removeItem("iub_currentUser");
+        localStorage.removeItem("iub_credits");
+        localStorage.removeItem("iub_freeAttempts");
         router.push('/login');
       }
     });
@@ -189,6 +192,11 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase.from("users").select("reg, phone, email").eq("email", session.user.email).maybeSingle();
         if (userRecord?.reg) {
           actualReg = userRecord.reg.toUpperCase();
+        } else {
+          // If logged in user doesn't have a linked DB record, push out instantly to maintain auth health
+          localStorage.removeItem("iub_currentUser");
+          router.push('/login');
+          return;
         }
 
         let actualName = "Student";
@@ -251,7 +259,7 @@ export default function DashboardPage() {
     fetchInitialData();
   }, [router]);
 
-  // REALTIME CHAT SYNC
+  // REALTIME REAL-TIME CHAT & BLUE TICK HANDLER
   useEffect(() => {
     if (!currentUser.reg) return;
 
@@ -270,7 +278,13 @@ export default function DashboardPage() {
           });
           
           if (newMsg.receiver_reg === currentUser.reg && !newMsg.is_read) {
-            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then();
+            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {
+              if (isAdmin && activeAdminChatUser) {
+                loadAdminSingleChat(activeAdminChatUser.reg, activeAdminChatUser.name);
+              } else if (!isAdmin) {
+                loadUserChat();
+              }
+            });
           }
         } else if (newMsg.receiver_reg === currentUser.reg) {
           setHasUnreadMessages(true);
@@ -288,7 +302,7 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(channel); }
   }, [currentUser.reg, activeAdminChatUser, isAdmin]);
 
-  // REALTIME ADMIN REQUESTS SYNC
+  // REALTIME INSTANT ADMIN REQUESTS & APPROVAL RE-FETCH SCRIPT
   useEffect(() => {
     if (isAdmin) {
       const adminChannel = supabase.channel('admin_realtime')
@@ -435,9 +449,8 @@ export default function DashboardPage() {
     try {
       const { data } = await supabase.rpc('get_admin_chat_list'); 
       if (data) {
-        const sorted = data.sort((a: any, b: any) => new Date(b.last_msg_time).getTime() - new Date(a.last_msg_time).getTime());
-        setAdminChatList(sorted);
-        const totalUnread = sorted.reduce((sum: number, u: any) => sum + u.unread, 0);
+        setAdminChatList(data);
+        const totalUnread = data.reduce((sum: number, u: any) => sum + u.unread, 0);
         setHasUnreadMessages(totalUnread > 0);
       }
     } catch(e) {}
@@ -495,6 +508,7 @@ export default function DashboardPage() {
     } catch (e) {}
   };
 
+  // 2-BEFORE AND 2-AFTER CHARACTER BOUNDARY MASK FOR FORGOT OPTION
   const maskEmail = (email: string) => {
     if (!email) return "Unknown";
     const parts = email.split("@");
@@ -929,7 +943,7 @@ export default function DashboardPage() {
 
               <button 
                 onClick={() => setActiveTab("credits")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold`}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d]' hover:bg-[#002a70]'} transition-all text-xs font-bold`}
               >
                 <Wallet size={14} className={t.primary} />
                 <span>{credits.toLocaleString()}</span>
@@ -1323,7 +1337,7 @@ export default function DashboardPage() {
                 
                 <div className="flex flex-col items-center mb-3">
                   <span className="text-[11px] font-bold uppercase tracking-widest opacity-50 mb-2">Search By</span>
-                  <div className={`flex p-1 rounded-xl w-full max-w-[300px] relative ${theme==='light'?'bg-slate-100 border border-slate-200 shadow-inner':'bg-[#00122a] border border-[#00348c]/30'}`}>
+                  <div className={`flex p-1 rounded-xl w-full max-w-[300px] relative ${theme==='light'?'bg-slate-100 border border-slate-200 shadow-inner':'bg-[#00122a]' border border-[#00348c]/30'}`}>
                     <div 
                       className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg transition-all duration-300 ease-out shadow-sm ${t.btnPrimary}`}
                       style={{ left: searchMode === 'Roll Number' ? '4px' : 'calc(50%)' }}
