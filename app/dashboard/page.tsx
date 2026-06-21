@@ -119,7 +119,7 @@ export default function DashboardPage() {
   // PWA STATE
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // PERSISTENT STRUCTURAL MOUNT LOGIC (Anti-Zero Loading Flash)
+  // PERSISTENT STRUCTURAL MOUNT LOGIC
   useEffect(() => {
     const savedTheme = localStorage.getItem("iub_theme") as Theme;
     if (savedTheme) setTheme(savedTheme);
@@ -193,7 +193,6 @@ export default function DashboardPage() {
         if (userRecord?.reg) {
           actualReg = userRecord.reg.toUpperCase();
         } else {
-          // If logged in user doesn't have a linked DB record, push out instantly to maintain auth health
           localStorage.removeItem("iub_currentUser");
           router.push('/login');
           return;
@@ -508,7 +507,6 @@ export default function DashboardPage() {
     } catch (e) {}
   };
 
-  // 2-BEFORE AND 2-AFTER CHARACTER BOUNDARY MASK FOR FORGOT OPTION
   const maskEmail = (email: string) => {
     if (!email) return "Unknown";
     const parts = email.split("@");
@@ -943,7 +941,7 @@ export default function DashboardPage() {
 
               <button 
                 onClick={() => setActiveTab("credits")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d]' hover:bg-[#002a70]'} transition-all text-xs font-bold`}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold`}
               >
                 <Wallet size={14} className={t.primary} />
                 <span>{credits.toLocaleString()}</span>
@@ -1275,7 +1273,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className={`relative overflow-hidden rounded-[1.75rem] p-5 sm:p-7 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c] shadow-amber-500/5'}`}>
+            <div className={`relative overflow-hidden rounded-[1.75rem] p-5 sm:p-7 shadow-xl mb-6 border ${theme === 'light' ? 'bg-gradient-to-br from-[#0056b3] to-[#00348c] text-white border-[#0056b3]/20 shadow-[#0056b3]/20' : 'bg-gradient-to-br from-[#001c4d] to-[#000a1a] text-blue-50 border-[#00348c]'}`}>
               <div className="absolute top-0 left-0 p-3 opacity-10 pointer-events-none transform -translate-x-3 -translate-y-3">
                 <GraduationCap size={140} />
               </div>
@@ -1337,7 +1335,7 @@ export default function DashboardPage() {
                 
                 <div className="flex flex-col items-center mb-3">
                   <span className="text-[11px] font-bold uppercase tracking-widest opacity-50 mb-2">Search By</span>
-                  <div className={`flex p-1 rounded-xl w-full max-w-[300px] relative ${theme==='light'?'bg-slate-100 border border-slate-200 shadow-inner':'bg-[#00122a]' border border-[#00348c]/30'}`}>
+                  <div className={`flex p-1 rounded-xl w-full max-w-[300px] relative ${theme==='light'?'bg-slate-100 border border-slate-200 shadow-inner':'bg-[#00122a] border border-[#00348c]/30'}`}>
                     <div 
                       className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg transition-all duration-300 ease-out shadow-sm ${t.btnPrimary}`}
                       style={{ left: searchMode === 'Roll Number' ? '4px' : 'calc(50%)' }}
