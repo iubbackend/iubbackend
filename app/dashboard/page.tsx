@@ -188,23 +188,53 @@ export default function DashboardPage() {
           return;
         }
 
+        // 1. Fetch user record based on the authenticated email session
         let actualReg = "UNKNOWN";
-        const { data: userRecord } = await supabase.from("users").select("reg, phone, email").eq("email", session.user.email).maybeSingle();
+        const { data: userRecord } = await supabase
+          .from("users")
+          .select("reg, phone, email")
+          .eq("email", session.user.email)
+          .maybeSingle();
+        
         if (userRecord?.reg) {
-          actualReg = userRecord.reg.toUpperCase();
+          // Ensure we keep the exact string case from the database for mapping calculations
+          actualReg = userRecord.reg; 
         } else {
           localStorage.removeItem("iub_currentUser");
           router.push('/login');
           return;
         }
-
+        
+        // 2. Fetch the student name matching the exact casing or using an insensitive fallback balance
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          const { data: studentNameRes } = await supabase.from("students").select("name").ilike("reg", actualReg).maybeSingle();
+          // Try matching directly first to satisfy strict case policies, then fallback
+          let { data: studentNameRes } = await supabase
+            .from("students")
+            .select("name")
+            .eq("reg", actualReg) // Casing-safe match to clear RLS policy restrictions
+            .maybeSingle();
+        
+          // Alternative fallback if casing differences live in the source imports
+          if (!studentNameRes?.name) {
+            const { data: lowerCaseRes } = await supabase
+              .from("students")
+              .select("name")
+              .ilike("reg", actualReg.trim())
+              .maybeSingle();
+            studentNameRes = lowerCaseRes;
+          }
+        
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
-
-        const newUserState = { reg: actualReg, name: actualName, phone: userRecord?.phone || "", email: userRecord?.email || "" };
+        
+        // 4. Save clean uppercase representations directly for frontend rendering consistency
+        const newUserState = { 
+          reg: actualReg.toUpperCase(), 
+          name: actualName, 
+          phone: userRecord?.phone || "", 
+          email: userRecord?.email || "" 
+        };
         setCurrentUser(newUserState);
         localStorage.setItem("iub_currentUser", JSON.stringify(newUserState));
 
