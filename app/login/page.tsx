@@ -125,42 +125,57 @@ function LoginContent() {
     e.preventDefault();
     clearMessages();
     setIsLoading(true);
-
+  
     const supabase = getSupabase();
-    const hashedPassword = await hashPassword(password);
     const cleanRollNumber = rollNumber.trim().toUpperCase();
-
+  
     try {
-      const { data, error } = await supabase
+      // 1. Find the email associated with this roll number first
+      const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, reg, email, phone')
+        .select('email')
         .ilike('reg', cleanRollNumber)
-        .ilike('pass', hashedPassword)
         .maybeSingle();
-
-      if (error || !data) {
+  
+      if (userError || !userData) {
+        setErrorMsg('Invalid Roll Number or Password.');
+        setIsLoading(false);
+        return;
+      }
+  
+      // 2. Authenticate directly using Supabase Auth with the retrieved email
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: userData.email.toLowerCase().trim(), 
+        password: password, 
+      });
+  
+      if (authError) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
-        const { error: authError } = await supabase.auth.signInWithPassword({
-          email: data.email.toLowerCase().trim(), 
-          password: password, 
-        });
-
-        if (authError) {
-          setErrorMsg('Authentication error: ' + authError.message);
-        } else {
-          const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
-          localStorage.setItem("iub_currentUser", JSON.stringify(userState));
-          
-          setSuccessMsg('Login successful! Welcome back.');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 500);
-        }
+        // 3. Complete session retrieval now that RLS allows access
+        const { data: profile } = await supabase
+          .from('users')
+          .select('reg, phone, email')
+          .ilike('reg', cleanRollNumber)
+          .maybeSingle();
+  
+        const userState = { 
+          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+          name: "Student", 
+          phone: profile?.phone || "", 
+          email: userData.email 
+        };
+        
+        localStorage.setItem("iub_currentUser", JSON.stringify(userState));
+        setSuccessMsg('Login successful! Welcome back.');
+        
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 500);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
-    } locate {
+    } finally {
       setIsLoading(false);
     }
   };
