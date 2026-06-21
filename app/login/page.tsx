@@ -252,28 +252,29 @@ function LoginContent() {
     }
   };
 
-  const handleForgotEmail = async (e: React.FormEvent) => {
+    const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
     
     const targetPhone = phone.trim();
-    const rawNumber = targetPhone.replace(/-/g, '');
-    if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
+    // Ensure the phone format matches how it is stored in your database
+    // If you store it as '0300-1234567', keep the hyphens.
+    if (targetPhone.length < 11) {
       setErrorMsg('Invalid phone number format.');
       return;
     }
-
+  
     setIsLoading(true);
     const supabase = getSupabase();
-
+  
     try {
+      // Correctly query by the phone column
       const { data, error } = await supabase
         .from('users')
-        .select('id, reg, email, phone')
-        .ilike('reg', cleanRollNumber)
-        .eq('pass', hashedPassword) // <--- Change .ilike to .eq here
+        .select('email')
+        .eq('phone', targetPhone.replace('-', '')) 
         .maybeSingle();
-      
+        
       if (error || !data) {
         setErrorMsg('No account found with this phone number.');
       } else {
