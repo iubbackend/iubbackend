@@ -162,7 +162,7 @@ export default function DashboardPage() {
   // STRICT AUTH STATE OBSERVER
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || event === 'USER_DELETED' || !session) {
+      if (event === 'SIGNED_OUT' || !session) {
         router.push('/login');
       }
     });
