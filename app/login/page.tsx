@@ -129,45 +129,52 @@ function LoginContent() {
 
     const supabase = getSupabase();
     const hashedPassword = await hashPassword(password);
+    const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+    setIsLoading(true);
+
+    const supabase = getSupabase();
+    const hashedPassword = await hashPassword(password);
+    
+    // Explicitly trim out any trailing spaces or tabs from input
     const cleanRollNumber = rollNumber.trim().toUpperCase();
 
-    try {
-      // Use case-insensitive verification to prevent profile dropouts
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, reg, email, phone')
-        .ilike('reg', cleanRollNumber)
-        .eq('pass', hashedPassword)
-        .maybeSingle();
-
-      if (error || !data) {
-        setErrorMsg('Invalid Roll Number or Password.');
-      } else {
-        const { error: authError } = await supabase.auth.signInWithPassword({
-          email: data.email.toLowerCase().trim(), 
-          password: password, 
-        });
-
-        if (authError) {
-          setErrorMsg('Authentication error: ' + authError.message);
+      try {
+        // Use ilike for a loose structural match to handle variable whitespaces
+        const { data, error } = await supabase
+          .from('users')
+          .select('id, reg, email, phone')
+          .ilike('reg', cleanRollNumber)
+          .ilike('pass', hashedPassword)
+          .maybeSingle();
+  
+        if (error || !data) {
+          setErrorMsg('Invalid Roll Number or Password.');
         } else {
-          // Pre-cache full profile directly onto local state block before jumping pages
-          const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
-          localStorage.setItem("iub_currentUser", JSON.stringify(userState));
-          
-          setSuccessMsg('Login successful! Welcome back.');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 500);
+          const { error: authError } = await supabase.auth.signInWithPassword({
+            email: data.email.toLowerCase().trim(), 
+            password: password, 
+          });
+  
+          if (authError) {
+            setErrorMsg('Authentication error: ' + authError.message);
+          } else {
+            const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
+            localStorage.setItem("iub_currentUser", JSON.stringify(userState));
+            
+            setSuccessMsg('Login successful! Welcome back.');
+            setTimeout(() => {
+              window.location.href = '/dashboard';
+            }, 500);
+          }
         }
+      } catch (err) {
+        setErrorMsg('An unexpected error occurred.');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      setErrorMsg('An unexpected error occurred.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+    };
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
