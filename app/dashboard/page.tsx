@@ -60,6 +60,7 @@ interface ChatMessage {
 }
 
 export default function DashboardPage() {
+  useEffect(() => { localStorage.clear(); }, []);
   const router = useRouter();
   
   const [theme, setTheme] = useState<Theme>("dark");
@@ -124,7 +125,7 @@ export default function DashboardPage() {
     const savedTheme = localStorage.getItem("iub_theme") as Theme;
     if (savedTheme) setTheme(savedTheme);
 
-    const cachedUser = localStorage.getItem("iub_currentUser");
+    const cachedUser = localStorage.getItem("iub_currentUser_v2");
     if (cachedUser) setCurrentUser(JSON.parse(cachedUser));
 
     const cachedCredits = localStorage.getItem("iub_credits");
@@ -162,12 +163,12 @@ export default function DashboardPage() {
   // STRICT FORCE-DROPOUT INTERCEPTOR
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
-        localStorage.removeItem("iub_currentUser");
-        localStorage.removeItem("iub_credits");
-        localStorage.removeItem("iub_freeAttempts");
+      // Only kick them out if they explicitly signed out
+      if (event === 'SIGNED_OUT') {
+        localStorage.clear(); // Clear everything
         router.push('/login');
       }
+      // If event is 'TOKEN_REFRESHED' or 'SIGNED_IN', do nothing.
     });
     return () => { authListener.subscription.unsubscribe(); };
   }, [router]);
@@ -236,7 +237,7 @@ export default function DashboardPage() {
           email: userRecord?.email || "" 
         };
         setCurrentUser(newUserState);
-        localStorage.setItem("iub_currentUser", JSON.stringify(newUserState));
+        localStorage.setItem("iub_currentUser_v2", JSON.stringify(newUserState));
 
         if (actualReg !== "UNKNOWN") {
           const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
