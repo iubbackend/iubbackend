@@ -43,10 +43,8 @@ function LoginContent() {
 
   // --- AUTOMATED REFERRAL EXTRACTOR & TRACKER ---
   useEffect(() => {
-    // 1. Check URL parameters (e.g., /login?ref=F20BSCS1M010)
     let ref = searchParams.get('ref');
 
-    // 2. Fallback check path mapping if routing structural logic uses /ref/REG structure directly
     if (!ref && typeof window !== 'undefined') {
       const pathParts = window.location.pathname.split('/');
       const refIdx = pathParts.indexOf('ref');
@@ -61,10 +59,8 @@ function LoginContent() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('referred_by', cleanRef);
       }
-      // Instantly open to signup variant view dynamically
       setView('signup');
     } else if (typeof window !== 'undefined') {
-      // Look up previous local storage session tokens if present
       const savedRef = localStorage.getItem('referred_by');
       if (savedRef) setReferralCode(savedRef.toUpperCase());
     }
@@ -73,13 +69,27 @@ function LoginContent() {
     setIsDarkMode(isDark);
   }, [searchParams]);
 
+  // STABLE COLOR MODE PERSISTENCE UPGRADE
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("iub_theme");
+    if (savedTheme === "light") {
+      document.documentElement.classList.remove("dark");
+      setIsDarkMode(false);
+    } else {
+      document.documentElement.classList.add("dark");
+      setIsDarkMode(true);
+    }
+  }, []);
+
   const toggleTheme = () => {
     const htmlClass = document.documentElement.classList;
     if (htmlClass.contains('dark')) {
       htmlClass.remove('dark');
+      localStorage.setItem("iub_theme", "light");
       setIsDarkMode(false);
     } else {
       htmlClass.add('dark');
+      localStorage.setItem("iub_theme", "dark");
       setIsDarkMode(true);
     }
   };
@@ -102,6 +112,16 @@ function LoginContent() {
     setPhone(value);
   };
 
+  // CLEAN MASKING CORE HOOK (Shows 2 starting, 2 ending letters of the mail name)
+  const maskEmailString = (rawEmail: string) => {
+    if (!rawEmail) return "";
+    const parts = rawEmail.split("@");
+    if (parts.length !== 2) return rawEmail;
+    const [name, domain] = parts;
+    if (name.length <= 4) return `${name.slice(0, 1)}***@${domain}`;
+    return `${name.slice(0, 2)}***${name.slice(-2)}@${domain}`;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
@@ -109,26 +129,32 @@ function LoginContent() {
 
     const supabase = getSupabase();
     const hashedPassword = await hashPassword(password);
+    const cleanRollNumber = rollNumber.trim().toUpperCase();
 
     try {
+      // Use case-insensitive verification to prevent profile dropouts
       const { data, error } = await supabase
         .from('users')
         .select('id, reg, email, phone')
-        .eq('reg', rollNumber)
+        .ilike('reg', cleanRollNumber)
         .eq('pass', hashedPassword)
-        .single();
+        .maybeSingle();
 
       if (error || !data) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
         const { error: authError } = await supabase.auth.signInWithPassword({
-          email: data.email, 
+          email: data.email.toLowerCase().trim(), 
           password: password, 
         });
 
         if (authError) {
           setErrorMsg('Authentication error: ' + authError.message);
         } else {
+          // Pre-cache full profile directly onto local state block before jumping pages
+          const userState = { reg: data.reg.toUpperCase(), name: "Student", phone: data.phone || "", email: data.email };
+          localStorage.setItem("iub_currentUser", JSON.stringify(userState));
+          
           setSuccessMsg('Login successful! Welcome back.');
           setTimeout(() => {
             window.location.href = '/dashboard';
@@ -146,7 +172,10 @@ function LoginContent() {
     e.preventDefault();
     clearMessages();
 
-    if (!email.toLowerCase().endsWith('@gmail.com')) {
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+
+    if (!cleanEmail.endsWith('@gmail.com')) {
       setErrorMsg('Only @gmail.com email addresses are allowed.');
       return;
     }
@@ -162,7 +191,7 @@ function LoginContent() {
 
     try {
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email,
+        email: cleanEmail,
         password: password,
       });
 
@@ -174,7 +203,7 @@ function LoginContent() {
 
       const { error } = await supabase
         .from('users')
-        .insert([{ reg: rollNumber.toUpperCase(), phone, email, pass: hashedPassword }]);
+        .insert([{ reg: cleanRoll, phone: phone.trim(), email: cleanEmail, pass: hashedPassword }]);
 
       if (error) {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
@@ -186,7 +215,7 @@ function LoginContent() {
           await supabase
             .from('user_credits')
             .insert([{ 
-              user_reg: rollNumber.toUpperCase(), 
+              user_reg: cleanRoll, 
               credits: 0, 
               free_searches_today: 0,
               referred_by: savedReferral ? savedReferral.toUpperCase() : null
@@ -201,8 +230,7 @@ function LoginContent() {
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
         setTimeout(() => {
-          setReferralCode(null);
-          switchView('login');
+          setView('login');
         }, 3000);
       }
     } catch (err) {
@@ -216,7 +244,8 @@ function LoginContent() {
     e.preventDefault();
     clearMessages();
     
-    const rawNumber = phone.replace(/-/g, '');
+    const targetPhone = phone.trim();
+    const rawNumber = targetPhone.replace(/-/g, '');
     if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
       setErrorMsg('Invalid phone number format.');
       return;
@@ -226,16 +255,18 @@ function LoginContent() {
     const supabase = getSupabase();
 
     try {
+      // ilike matching safeguards against string variants across tables
       const { data, error } = await supabase
         .from('users')
         .select('email')
-        .eq('phone', phone)
-        .single();
+        .ilike('phone', targetPhone)
+        .maybeSingle();
 
       if (error || !data) {
         setErrorMsg('No account found with this phone number.');
       } else {
-        setSuccessMsg(`Your registered email is: ${data.email}`);
+        // STRICT REQUIREMENT MET: Encapsulate using masked layout
+        setSuccessMsg(`Your registered email is: ${maskEmailString(data.email)}`);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
@@ -250,14 +281,16 @@ function LoginContent() {
     setIsLoading(true);
 
     const supabase = getSupabase();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+    const cleanEmail = email.toLowerCase().trim();
 
     try {
       const { data, error: matchError } = await supabase
         .from('users')
         .select('id')
-        .eq('reg', rollNumber)
-        .eq('email', email)
-        .single();
+        .ilike('reg', cleanRoll)
+        .ilike('email', cleanEmail)
+        .maybeSingle();
 
       if (matchError || !data) {
         setErrorMsg('Roll Number and Email combination not found.');
@@ -265,7 +298,7 @@ function LoginContent() {
         return;
       }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
       
       if (error) {
         setErrorMsg('Failed to send OTP. Ensure Supabase Auth is configured.');
@@ -314,13 +347,12 @@ function LoginContent() {
           </p>
         </div>
 
-        {/* LOCKED REFERRAL SYSTEM MESSAGE BADGE */}
         {view === 'signup' && referralCode && (
           <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
             <Share2 size={18} className="animate-pulse" />
             <div className="text-left">
               <p className="text-xs font-black uppercase tracking-wider">Referral Code Applied</p>
-              <p className="text-[11px] opacity-90">Invited by: <span className="font-mono font-bold">{referralCode}</span> (Locked)</p>
+              <p className="text-xs opacity-90">Invited by: <span className="font-mono font-bold">{referralCode}</span> (Locked)</p>
             </div>
           </div>
         )}
@@ -486,7 +518,6 @@ function LoginContent() {
   );
 }
 
-// Next.js static rendering protection for useSearchParams hook parsing
 export default function LoginPage() {
   return (
     <Suspense fallback={
