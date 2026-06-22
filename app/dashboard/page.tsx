@@ -18,26 +18,10 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 // Synchronized with structural backend ledger arrays
-const ADMIN_REGS = ["S25BARIN1M01118", "S20BSCS1M01001"];
+const ADMIN_REGS = ["", "S20BSCS1M01001"];
 const SEARCH_COST = 850; 
-const userState = { 
-        reg: profile?.reg.toUpperCase() || cleanRollNumber, 
-        name: isProfileAdmin ? "Admin" : "Student", 
-        phone: profile?.phone || "", 
-        email: userData.email 
-      };
-      
-      localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
-      setSuccessMsg('Login successful! Welcome back.');
-      
-      setTimeout(() => {
-        window.location.href = '/dashboard';
-      }, 500);
-    }
 
 type SearchMode = "Roll Number" | "Name";
-type Theme = "light" | "dark";
-type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management" | "edit_courses";
 
 interface FilterItem {
   id: number;
