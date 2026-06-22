@@ -20,6 +20,20 @@ const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 // Synchronized with structural backend ledger arrays
 const ADMIN_REGS = ["S25BARIN1M01118", "S20BSCS1M01001"];
 const SEARCH_COST = 850; 
+const userState = { 
+        reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+        name: isProfileAdmin ? "Admin" : "Student", 
+        phone: profile?.phone || "", 
+        email: userData.email 
+      };
+      
+      localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+      setSuccessMsg('Login successful! Welcome back.');
+      
+      setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 500);
+    }
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
