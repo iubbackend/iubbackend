@@ -1354,12 +1354,12 @@ export default function DashboardPage() {
                                         }
                                         try {
                                           const { error } = await supabase
-                                            .from('subjects')
+                                            .from('courses') // Changed from 'subjects' to 'courses'
                                             .update({ 
                                               course_name: courseForm.name.trim(), 
-                                              credit_hours: courseForm.credits 
+                                              credit_hours: Number(courseForm.credits) // Explicitly cast to integer to prevent type dropping
                                             })
-                                            .eq('id', course.id); // Secure targeted row match
+                                            .eq('id', course.id);
         
                                           if (error) throw error;
                                           
