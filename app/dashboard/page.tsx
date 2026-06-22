@@ -301,7 +301,6 @@ export default function DashboardPage() {
     
     fetchInitialData();
   }, [router]);
-
         const newFilters = {
           departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
           sessions: (sessionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.session_code })),
