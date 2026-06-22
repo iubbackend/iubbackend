@@ -629,12 +629,11 @@ export default function DashboardPage() {
     try {
       const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
       if (!receiver) return;
-  
+
       if (editingMsgId) {
         await supabase.from('messages').update({ content: chatInput.trim() }).eq('id', editingMsgId);
         setEditingMsgId(null);
       } else {
-        // Force uppercase matching on the sender details to prevent RLS/foreign key validation drops
         await supabase.from('messages').insert({
           sender_reg: currentUser.reg.toUpperCase(),
           receiver_reg: receiver.toUpperCase(),
@@ -645,7 +644,6 @@ export default function DashboardPage() {
       }
       setChatInput("");
       
-      // Optimistic fallback update for the user view if real-time engine throttles
       if (!isAdmin) {
         loadUserChat();
       } else if (activeAdminChatUser) {
@@ -654,9 +652,6 @@ export default function DashboardPage() {
     } catch(e) {
       showToast("Error", "Message delivery failed.", "error");
     }
-  };
-      setChatInput("");
-    } catch(e) {}
   };
 
   const handleDeleteMessage = async (id: string) => {
