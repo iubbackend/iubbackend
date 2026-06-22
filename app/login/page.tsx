@@ -242,7 +242,12 @@ function LoginContent() {
         return;
       }
   
-      let formattedMsg = 'A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!';
+      let formattedMsg = (
+        <>
+          A verification code has been sent.<br />
+          <span className="font-bold">IMPORTANT:</span> If you do not see it in your Inbox, check your SPAM/JUNK folder!
+        </>
+      );
       setSuccessMsg(formattedMsg);
       setResendCountdown(60);
       setTimeout(() => {
