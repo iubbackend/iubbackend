@@ -450,11 +450,11 @@ function LoginContent() {
     const cleanRoll = rollNumber.trim().toUpperCase();
 
     try {
-      // 1. Validate code input context using 'email' type configuration
+      // 1. Validate code input
       const { error: otpError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
-        type: 'email', 
+        type: 'email',
       });
 
       if (otpError) {
@@ -463,7 +463,7 @@ function LoginContent() {
         return;
       }
 
-      // 2. Perform raw encryption update over your manual custom schema tracking table
+      // 2. Perform encryption and DB update
       const hashedPass = await hashPassword(newPassword);
       const { error: dbError } = await supabase
         .from('users')
@@ -476,37 +476,10 @@ function LoginContent() {
         return;
       }
 
-      // 3. Sync authentication state identity platform parameters
+      // 3. Sync Auth password
       await supabase.auth.updateUser({ password: newPassword });
 
-      setSuccessMsg('Your security credentials have been successfully updated. Routing to login...');
-      setTimeout(() => {
-        switchView('login');
-      }, 2500);
-    } catch (err) {
-      setErrorMsg('Critical password modification task exception.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-      // 2. Perform raw payload encryption switch override
-      const hashedPass = await hashPassword(newPassword);
-      const { error: dbError } = await supabase
-        .from('users')
-        .update({ pass: hashedPass })
-        .ilike('reg', cleanRoll);
-
-      if (dbError) {
-        setErrorMsg('Auth signature accepted, but user profile update rejected.');
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. Sync authentication state engine password
-      await supabase.auth.updateUser({ password: newPassword });
-
-      setSuccessMsg('Your security credentials have been successfully updated. Routing to login...');
+      setSuccessMsg('Your credentials have been updated. Routing to login...');
       setTimeout(() => {
         switchView('login');
       }, 2500);
