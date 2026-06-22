@@ -7,7 +7,7 @@ import {
   Sun, Moon, ChevronDown, Lock,
   Menu, CreditCard, History, Share2, Wallet,
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle,
-  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send, Download, Unlock
+  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send, Download, Unlock, BookOpen, UserCog
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
@@ -22,7 +22,7 @@ const SEARCH_COST = 850;
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
-type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats";
+type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management" | "edit_courses";
 
 interface FilterItem {
   id: number;
@@ -60,7 +60,6 @@ interface ChatMessage {
 }
 
 export default function DashboardPage() {
-  useEffect(() => { localStorage.clear(); }, []);
   const router = useRouter();
   
   const [theme, setTheme] = useState<Theme>("dark");
@@ -106,6 +105,13 @@ export default function DashboardPage() {
   const [approvedHistory, setApprovedHistory] = useState<any[]>([]);
   const [adminStats, setAdminStats] = useState({ sales: 0, pending: 0, totalUsers: 0, premiumUsers: 0, profit: 0, searches: 0 });
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [manualPay, setManualPay] = useState({ reg: "", amount: "" });
+  const [manageUsers, setManageUsers] = useState<any[]>([]);
+  const [manageUsersPage, setManageUsersPage] = useState(0);
+  const [manageUsersSearch, setManageUsersSearch] = useState("");
+
+  // USER COURSES STATES
+  const [editableCourses, setEditableCourses] = useState<any[]>([]);
 
   // CHAT STATES
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -117,10 +123,13 @@ export default function DashboardPage() {
   const [activeAdminChatUser, setActiveAdminChatUser] = useState<{reg: string, name: string} | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
+  // REFS FOR REALTIME CLOSURES
+  const chatStateRef = useRef({ currentUser, activeAdminChatUser, isAdmin });
+  useEffect(() => { chatStateRef.current = { currentUser, activeAdminChatUser, isAdmin }; }, [currentUser, activeAdminChatUser, isAdmin]);
+
   // PWA STATE
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // PERSISTENT STRUCTURAL MOUNT LOGIC
   useEffect(() => {
     const savedTheme = localStorage.getItem("iub_theme") as Theme;
     if (savedTheme) setTheme(savedTheme);
@@ -160,15 +169,22 @@ export default function DashboardPage() {
     }
   };
 
-  // STRICT FORCE-DROPOUT INTERCEPTOR
+  const forceLogout = async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    document.cookie.split(";").forEach((c) => {
+        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
+    await supabase.auth.signOut();
+    router.push('/signup');
+  };
+
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      // Only kick them out if they explicitly signed out
       if (event === 'SIGNED_OUT') {
-        localStorage.clear(); // Clear everything
+        localStorage.clear(); 
         router.push('/login');
       }
-      // If event is 'TOKEN_REFRESHED' or 'SIGNED_IN', do nothing.
     });
     return () => { authListener.subscription.unsubscribe(); };
   }, [router]);
@@ -189,7 +205,6 @@ export default function DashboardPage() {
           return;
         }
 
-        // 1. Fetch user record based on the authenticated email session
         let actualReg = "UNKNOWN";
         const { data: userRecord } = await supabase
           .from("users")
@@ -198,25 +213,20 @@ export default function DashboardPage() {
           .maybeSingle();
         
         if (userRecord?.reg) {
-          // Ensure we keep the exact string case from the database for mapping calculations
           actualReg = userRecord.reg; 
         } else {
-          localStorage.removeItem("iub_currentUser");
-          router.push('/login');
+          forceLogout();
           return;
         }
         
-        // 2. Fetch the student name matching the exact casing or using an insensitive fallback balance
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          // Try matching directly first to satisfy strict case policies, then fallback
           let { data: studentNameRes } = await supabase
             .from("students")
             .select("name")
-            .eq("reg", actualReg) // Casing-safe match to clear RLS policy restrictions
+            .eq("reg", actualReg) 
             .maybeSingle();
         
-          // Alternative fallback if casing differences live in the source imports
           if (!studentNameRes?.name) {
             const { data: lowerCaseRes } = await supabase
               .from("students")
@@ -229,7 +239,6 @@ export default function DashboardPage() {
           if (studentNameRes?.name) actualName = studentNameRes.name;
         }
         
-        // 4. Save clean uppercase representations directly for frontend rendering consistency
         const newUserState = { 
           reg: actualReg.toUpperCase(), 
           name: actualName, 
@@ -289,17 +298,18 @@ export default function DashboardPage() {
     fetchInitialData();
   }, [router]);
 
-  // REALTIME REAL-TIME CHAT & BLUE TICK HANDLER
+  // REALTIME CHAT HANDLER
   useEffect(() => {
     if (!currentUser.reg) return;
 
     const channel = supabase.channel('messages_realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const newMsg = payload.new as ChatMessage;
+        const state = chatStateRef.current;
         
-        const isActiveChat = isAdmin 
-          ? (activeAdminChatUser && ((newMsg.sender_reg === activeAdminChatUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === activeAdminChatUser.reg)))
-          : ((newMsg.sender_reg === currentUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === currentUser.reg));
+        const isActiveChat = state.isAdmin 
+          ? (state.activeAdminChatUser && ((newMsg.sender_reg === state.activeAdminChatUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === state.activeAdminChatUser.reg)))
+          : ((newMsg.sender_reg === state.currentUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === state.currentUser.reg));
 
         if (isActiveChat) {
           setChatMessages(prev => {
@@ -307,32 +317,31 @@ export default function DashboardPage() {
             return [...prev, newMsg];
           });
           
-          if (newMsg.receiver_reg === currentUser.reg && !newMsg.is_read) {
+          if (newMsg.receiver_reg === state.currentUser.reg && !newMsg.is_read) {
             supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {
-              if (isAdmin && activeAdminChatUser) {
-                loadAdminSingleChat(activeAdminChatUser.reg, activeAdminChatUser.name);
-              } else if (!isAdmin) {
-                loadUserChat();
+              if (state.isAdmin && state.activeAdminChatUser) {
+                // Ensure we don't accidentally reload and wipe local optimistic updates
+              } else if (!state.isAdmin) {
+                // Same here
               }
             });
           }
-        } else if (newMsg.receiver_reg === currentUser.reg) {
+        } else if (newMsg.receiver_reg === state.currentUser.reg) {
           setHasUnreadMessages(true);
         }
 
-        if (isAdmin) loadAdminChatList();
+        if (state.isAdmin) loadAdminChatList();
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
         const updatedMsg = payload.new as ChatMessage;
         setChatMessages(prev => prev.map(m => m.id === updatedMsg.id ? updatedMsg : m));
-        if (isAdmin) loadAdminChatList();
+        if (chatStateRef.current.isAdmin) loadAdminChatList();
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); }
-  }, [currentUser.reg, activeAdminChatUser, isAdmin]);
+  }, [currentUser.reg]);
 
-  // REALTIME INSTANT ADMIN REQUESTS & APPROVAL RE-FETCH SCRIPT
   useEffect(() => {
     if (isAdmin) {
       const adminChannel = supabase.channel('admin_realtime')
@@ -348,6 +357,8 @@ export default function DashboardPage() {
     if (activeTab === "history") loadPaidSearchHistory();
     if (activeTab === "contact" && !isAdmin) loadUserChat();
     if (activeTab === "admin_chats" && isAdmin) loadAdminChatList();
+    if (activeTab === "users_management" && isAdmin) loadManageUsers(0);
+    if (activeTab === "edit_courses" && !isAdmin) loadEditableCourses();
   }, [activeTab]);
 
   useEffect(() => {
@@ -358,8 +369,20 @@ export default function DashboardPage() {
 
   const loadRealAdminData = async () => {
     try {
-      const { data: pendingData } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
-      setPendingApprovals(pendingData || []);
+      const { data: pendingDataRaw } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+      
+      // Fetch users dynamically to enrich pending approvals with Phone/Email/Name beautifully
+      let enrichedPending = pendingDataRaw || [];
+      if (enrichedPending.length > 0) {
+        const regs = enrichedPending.map((p: any) => p.user_reg);
+        const { data: usersData } = await supabase.from('users').select('reg, email, phone').in('reg', regs);
+        
+        enrichedPending = enrichedPending.map((p: any) => {
+           const uMatch = usersData?.find(u => u.reg === p.user_reg);
+           return { ...p, email: uMatch?.email || "Unknown", phone: uMatch?.phone || "Unknown" };
+        });
+      }
+      setPendingApprovals(enrichedPending);
 
       const { data: approvedData } = await supabase.from('payments_record').select('*').eq('status', 'approved').order('created_at', { ascending: false });
       setApprovedHistory(approvedData || []);
@@ -373,7 +396,7 @@ export default function DashboardPage() {
 
       const stats = {
         sales: totalSales,
-        pending: pendingData?.length || 0,
+        pending: pendingDataRaw?.length || 0,
         totalUsers: userCount || 0,
         premiumUsers: premiumCount || 0,
         profit: totalProfit,
@@ -387,6 +410,67 @@ export default function DashboardPage() {
     } catch (e) {
       console.error("Failed to load admin stats", e);
     }
+  };
+
+  const loadManageUsers = async (pageIndex = 0, query = manageUsersSearch) => {
+      try {
+          let req = supabase.from('users').select('*').range(pageIndex * 15, (pageIndex + 1) * 15 - 1);
+          if (query) {
+              req = req.or(`reg.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%`);
+          }
+          const { data } = await req;
+          if (pageIndex === 0) setManageUsers(data || []);
+          else setManageUsers(prev => [...prev, ...(data || [])]);
+          setManageUsersPage(pageIndex);
+      } catch(e) { }
+  };
+
+  const handleUpdateManageUser = async (userReg: string, field: string, currentValue: string) => {
+      const newValue = window.prompt(`Update ${field} for ${userReg}:`, currentValue);
+      if (newValue !== null && newValue.trim() !== "") {
+          try {
+              await supabase.from('users').update({ [field]: newValue.trim() }).eq('reg', userReg);
+              showToast('Success', `Updated ${field} successfully.`, 'info');
+              loadManageUsers(0);
+          } catch(e) { showToast('Error', 'Update failed.', 'error'); }
+      }
+  };
+
+  const loadEditableCourses = async () => {
+    try {
+      const { data: student } = await supabase.from('students').select('id').eq('reg', currentUser.reg).single();
+      if (!student) return;
+      const { data: results } = await supabase.from('results').select('id, semester, subject_id(id, course_code, course_name, credit_hours)').eq('student_id', student.id);
+      
+      const unique = [];
+      const seen = new Set();
+      results?.forEach((r: any) => {
+         if(r.subject_id && !seen.has(r.subject_id.id)) {
+             seen.add(r.subject_id.id);
+             unique.push({ result_id: r.id, sem: r.semester, ...r.subject_id });
+         }
+      });
+      
+      const sorted = unique.sort((a, b) => {
+        const numA = parseInt(a.sem?.replace(/\D/g, '')) || 0;
+        const numB = parseInt(b.sem?.replace(/\D/g, '')) || 0;
+        return numB - numA;
+      });
+
+      setEditableCourses(sorted);
+    } catch(e) {}
+  };
+
+  const handleCourseUpdate = async (subjectId: string, newName: string, newCredits: string) => {
+    try {
+      const formattedName = newName.replace(/\b\w/g, c => c.toUpperCase());
+      const cr = Number(newCredits);
+      if (![2, 3, 4].includes(cr)) return showToast('Error', 'Credit hours must be 2, 3, or 4', 'error');
+
+      await supabase.from('subjects').update({ course_name: formattedName, credit_hours: cr }).eq('id', subjectId);
+      showToast('Success', 'Course details updated successfully!', 'info');
+      loadEditableCourses();
+    } catch(e) { showToast('Error', 'Update failed.', 'error'); }
   };
 
   const loadCreditsHistory = async (page = 1) => {
@@ -443,6 +527,45 @@ export default function DashboardPage() {
     } catch (e) {
       showToast("Error", "Failed to approve payment.", "error");
     }
+  };
+
+  const handleAdminReject = async (paymentId: string) => {
+    if (window.confirm("Are you sure you want to reject this request?")) {
+        try {
+            await supabase.from('payments_record').update({ status: 'rejected' }).eq('id', paymentId);
+            showToast("Rejected", "Request rejected successfully.", "info");
+            loadRealAdminData();
+        } catch(e) { showToast("Error", "Failed to reject.", "error"); }
+    }
+  };
+
+  const handleAdminModify = async (paymentId: string, currentAmount: number) => {
+    const newAmount = window.prompt("Modify Amount for this request:", currentAmount.toString());
+    if (newAmount && !isNaN(Number(newAmount))) {
+        try {
+            await supabase.from('payments_record').update({ amount: Number(newAmount) }).eq('id', paymentId);
+            showToast("Modified", `Amount updated to Rs ${newAmount}`, "info");
+            loadRealAdminData();
+        } catch(e) { showToast("Error", "Failed to modify.", "error"); }
+    }
+  };
+
+  const handleAdminManualAward = async () => {
+      if(!manualPay.reg || !manualPay.amount) return showToast("Error", "Enter Reg and Amount", "error");
+      try {
+          const { data: pending } = await supabase.from('payments_record').insert({
+              user_reg: manualPay.reg.toUpperCase(),
+              amount: Number(manualPay.amount),
+              account_name: 'Admin Manual',
+              tid_number: 'MANUAL-' + Date.now(),
+              package_id: 'custom'
+          }).select().single();
+
+          if(pending) {
+              await handleAdminApprove(pending.id, pending.user_reg, pending.amount);
+              setManualPay({ reg: "", amount: "" });
+          }
+      } catch(e) { showToast("Error", "Failed to award.", "error"); }
   };
 
   const handleAdminReverse = async (paymentId: string, reg: string, amount: number) => {
@@ -568,7 +691,7 @@ export default function DashboardPage() {
   };
 
   const formatFirstName = (fullName: string) => {
-    if (!fullName) return "";
+    if (!fullName || fullName === "Loading...") return fullName;
     const parts = fullName.trim().split(/\s+/);
     if (parts.length > 1 && parts[0].toLowerCase() === "muhammad") {
       return parts[1];
@@ -711,32 +834,32 @@ export default function DashboardPage() {
 
   const getSemesterNumber = (reg: string, currentSemName: string) => {
     if (!reg || !currentSemName) return "";
-  
+ 
     const cleanReg = reg.trim().toUpperCase();
     const cleanSem = currentSemName.trim().toUpperCase();
-  
+ 
     const regMatch = cleanReg.match(/^(S|F)(\d{2})/);
     const semMatch = cleanSem.match(/(SPRING|FALL)\s+(\d{4})/);
-  
+ 
     if (!regMatch || !semMatch) return currentSemName; 
-  
+ 
     const entryIsSpring = regMatch[1] === "S";
     const entryYear = 2000 + parseInt(regMatch[2]);
-  
+ 
     const targetIsSpring = semMatch[1] === "SPRING";
     const targetYear = parseInt(semMatch[2]);
-  
+ 
     const entrySequence = (entryYear * 2) + (entryIsSpring ? 0 : 1);
     const targetSequence = (targetYear * 2) + (targetIsSpring ? 0 : 1);
-  
+ 
     const semesterNum = (targetSequence - entrySequence) + 1;
-  
+ 
     if (semesterNum <= 0) return currentSemName; 
-  
+ 
     const suffixes = ["th", "st", "nd", "rd"];
     const v = semesterNum % 100;
     const suffix = suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
-  
+ 
     return `${semesterNum}${suffix} Semester • ${semMatch[1].charAt(0) + semMatch[1].slice(1).toLowerCase()} ${targetYear}`;
   };
 
@@ -894,6 +1017,11 @@ export default function DashboardPage() {
   ];
 
   const handlePaymentSubmit = async () => {
+    if (!currentUser.reg || currentUser.reg === "UNKNOWN" || currentUser.name.includes("Loading")) {
+        forceLogout();
+        return;
+    }
+
     if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Fill all details", "error");
     if (paymentForm.package === 'custom' && (!paymentForm.amount || isNaN(Number(paymentForm.amount)))) return showToast("Invalid Amount", "Enter valid amount", "error");
     
@@ -1015,7 +1143,7 @@ export default function DashboardPage() {
                 </div>
                 <button onClick={() => setSidebarOpen(false)}><X size={20} className={t.textMuted} /></button>
               </div>
-              <div className="p-3 flex-1 space-y-1">
+              <div className="p-3 flex-1 space-y-1 overflow-y-auto">
                 <button onClick={() => { setActiveTab('home'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'home' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                   <Search size={18} /> Search Portal
                 </button>
@@ -1024,6 +1152,9 @@ export default function DashboardPage() {
                   <>
                     <button onClick={() => { setActiveTab('approvals'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'approvals' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <CheckCircle2 size={18} /> Approvals
+                    </button>
+                    <button onClick={() => { setActiveTab('users_management'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'users_management' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <UserCog size={18} /> Manage Users
                     </button>
                     <button onClick={() => { setActiveTab('leaderboard'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'leaderboard' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <Crown size={18} /> Leaderboards
@@ -1037,6 +1168,9 @@ export default function DashboardPage() {
 
                 {!isAdmin && (
                   <>
+                    <button onClick={() => { setActiveTab('edit_courses'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'edit_courses' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
+                      <BookOpen size={18} /> Edit Courses Details
+                    </button>
                     <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <CreditCard size={18} /> Credits & Wallet
                     </button>
@@ -1076,22 +1210,141 @@ export default function DashboardPage() {
           </motion.div>
         )}
 
+        {/* TAB: NORMAL USER EDIT COURSES */}
+        {!isAdmin && activeTab === "edit_courses" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+             <h2 className="text-2xl font-black mb-2 flex items-center gap-2"><BookOpen className={t.primary} /> Edit Courses Details</h2>
+             <p className="opacity-70 mb-5 text-sm">You can fix typo errors in course names (auto-capitalized) and adjust credit hours (limited to 2, 3, or 4). Course codes cannot be modified.</p>
+             
+             {editableCourses.length === 0 && <div className="text-center p-8 opacity-50 border rounded-2xl">No courses found.</div>}
+             
+             <div className="space-y-4">
+               {editableCourses.map((course, idx) => (
+                 <div key={idx} className={`${t.cardBg} border ${t.border} p-5 rounded-2xl flex flex-col md:flex-row gap-4 justify-between md:items-center shadow-sm`}>
+                    <div className="flex-1">
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono font-semibold mb-2 inline-block ${theme === 'light' ? 'bg-slate-100 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>{course.course_code}</span>
+                      <input 
+                         type="text" 
+                         defaultValue={course.course_name}
+                         onBlur={(e) => {
+                             if(e.target.value !== course.course_name) handleCourseUpdate(course.id, e.target.value, course.credit_hours);
+                         }}
+                         className={`w-full font-bold text-base bg-transparent border-b ${t.border} py-1 focus:outline-none focus:border-amber-500`} 
+                         placeholder="Course Name"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                       <div className="flex flex-col">
+                         <span className="text-[10px] font-bold uppercase opacity-50">Cr. Hours</span>
+                         <select 
+                           defaultValue={course.credit_hours} 
+                           onChange={(e) => handleCourseUpdate(course.id, course.course_name, e.target.value)}
+                           className={`bg-transparent border ${t.border} rounded-lg px-3 py-1.5 focus:outline-none focus:border-amber-500`}
+                         >
+                            <option className="text-black" value="2">2</option>
+                            <option className="text-black" value="3">3</option>
+                            <option className="text-black" value="4">4</option>
+                         </select>
+                       </div>
+                    </div>
+                 </div>
+               ))}
+             </div>
+          </motion.div>
+        )}
+
+        {/* TAB: ADMIN MANAGE USERS */}
+        {isAdmin && activeTab === "users_management" && (
+           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <h2 className="text-2xl font-black mb-2 flex items-center gap-2 text-amber-500"><UserCog /> Manage Users Database</h2>
+              <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
+                 <div className="flex flex-col sm:flex-row gap-3 mb-5">
+                    <div className="flex-1 relative">
+                       <Search className={`absolute left-3.5 top-3 ${t.textMuted}`} size={18} />
+                       <input 
+                         type="text" 
+                         placeholder="Search Reg, Email, or Phone..." 
+                         value={manageUsersSearch} 
+                         onChange={(e) => setManageUsersSearch(e.target.value)}
+                         onKeyDown={(e) => e.key === 'Enter' && loadManageUsers(0)}
+                         className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 pl-10 pr-3 focus:outline-none ${t.inputFocus}`}
+                       />
+                    </div>
+                    <button onClick={() => loadManageUsers(0)} className={`${t.btnPrimary} font-bold rounded-xl px-6 py-2.5 shadow-md`}>Search</button>
+                 </div>
+                 
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left whitespace-nowrap">
+                      <thead className={`bg-slate-500/5 text-opacity-80 border-b ${t.border}`}>
+                         <tr>
+                           <th className="px-4 py-3 font-bold">Reg Number</th>
+                           <th className="px-4 py-3 font-bold">Email</th>
+                           <th className="px-4 py-3 font-bold">Phone</th>
+                           <th className="px-4 py-3 font-bold text-center">Action</th>
+                         </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-500/10">
+                         {manageUsers.length === 0 && <tr><td colSpan={4} className="p-5 text-center opacity-50">No users found</td></tr>}
+                         {manageUsers.map(u => (
+                            <tr key={u.reg} className={t.rowHover}>
+                               <td className="px-4 py-3 font-bold text-[12px] font-mono">{u.reg}</td>
+                               <td className="px-4 py-3 cursor-pointer hover:underline" onClick={() => handleUpdateManageUser(u.reg, 'email', u.email)}>{u.email || "N/A"}</td>
+                               <td className="px-4 py-3 cursor-pointer hover:underline" onClick={() => handleUpdateManageUser(u.reg, 'phone', u.phone)}>{u.phone || "N/A"}</td>
+                               <td className="px-4 py-3 text-center">
+                                  <button onClick={() => handleUpdateManageUser(u.reg, 'email', u.email)} className="bg-slate-500/10 p-1.5 rounded-md hover:bg-slate-500/20"><Edit2 size={14}/></button>
+                               </td>
+                            </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                 </div>
+                 <div className="mt-4 flex justify-center">
+                   <button onClick={() => loadManageUsers(manageUsersPage + 1)} className={`text-xs font-bold px-6 py-2 rounded-xl border ${t.border} bg-transparent hover:bg-slate-500/10 transition-colors`}>Load Next 15</button>
+                 </div>
+              </div>
+           </motion.div>
+        )}
+
         {/* TAB: ADMIN APPROVALS PAGE */}
         {isAdmin && activeTab === "approvals" && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-             <h2 className="text-2xl font-black mb-2 flex items-center gap-2 text-amber-500"><CheckCircle2 /> Manage Approvals</h2>
+             <h2 className="text-2xl font-black mb-2 flex items-center gap-2 text-amber-500"><CheckCircle2 /> Manage Approvals & Payments</h2>
              
+             {/* Manual Credit Award */}
+             <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl shadow-sm border-l-4 border-l-amber-500`}>
+                <h3 className="font-bold text-base mb-3 flex items-center gap-2"><CreditCard size={18}/> Manual Credit Award</h3>
+                <div className="flex flex-col sm:flex-row gap-3 items-center">
+                   <input type="text" placeholder="Enter Registration Number" value={manualPay.reg} onChange={e=>setManualPay({...manualPay, reg:e.target.value})} className={`flex-1 w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 focus:outline-none ${t.inputFocus}`} />
+                   <input type="number" placeholder="Enter Equivalent Rs" value={manualPay.amount} onChange={e=>setManualPay({...manualPay, amount:e.target.value})} className={`w-full sm:w-48 ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 focus:outline-none ${t.inputFocus}`} />
+                   <button onClick={handleAdminManualAward} className={`${t.btnPrimary} w-full sm:w-auto font-bold rounded-xl px-6 py-2.5 shadow-md flex items-center justify-center gap-2`}>
+                      Award Credits
+                   </button>
+                </div>
+             </div>
+
              <div className={`${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
-                <h3 className="font-bold text-base mb-3">Pending Payment Approvals</h3>
-                <div className="space-y-2">
-                  {pendingApprovals.length === 0 && <p className="opacity-50">No pending approvals.</p>}
+                <h3 className="font-bold text-base mb-4">Pending Payment Approvals</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pendingApprovals.length === 0 && <p className="opacity-50 col-span-full">No pending approvals.</p>}
                   {pendingApprovals.map((p) => (
-                    <div key={p.id} className={`flex justify-between items-center p-3 border ${t.border} rounded-xl hover:bg-slate-500/5`}>
-                      <div>
-                        <p className="font-bold">{p.user_reg}</p>
-                        <p className="text-[11px] opacity-70 font-mono">TID: {p.tid_number} | Amount: Rs {p.amount}</p>
+                    <div key={p.id} className={`flex flex-col justify-between p-4 border border-amber-500/20 bg-amber-500/5 rounded-2xl shadow-sm`}>
+                      <div className="mb-4">
+                        <div className="flex justify-between items-start mb-2">
+                           <h4 className="font-black text-lg text-amber-500">{p.user_reg}</h4>
+                           <span className="bg-amber-500/20 text-amber-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Rs {p.amount}</span>
+                        </div>
+                        <div className="space-y-1 text-sm">
+                           <p className="flex items-center gap-2"><span className="opacity-50 w-12">Name:</span> <strong>{p.account_name}</strong></p>
+                           <p className="flex items-center gap-2"><span className="opacity-50 w-12">Phone:</span> <strong>{p.phone}</strong></p>
+                           <p className="flex items-center gap-2"><span className="opacity-50 w-12">Email:</span> <strong>{p.email}</strong></p>
+                           <p className="flex items-center gap-2"><span className="opacity-50 w-12">TID:</span> <strong className="font-mono text-xs">{p.tid_number}</strong></p>
+                        </div>
                       </div>
-                      <button onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg font-bold transition-colors">Approve</button>
+                      <div className="flex gap-2 border-t border-amber-500/20 pt-3">
+                        <button onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl font-bold shadow-md transition-all text-xs flex items-center justify-center gap-1"><Check size={14}/> Approve</button>
+                        <button onClick={() => handleAdminModify(p.id, p.amount)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl font-bold shadow-md transition-all text-xs flex items-center justify-center gap-1"><Edit2 size={14}/> Modify</button>
+                        <button onClick={() => handleAdminReject(p.id)} className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-xl font-bold shadow-md transition-all text-xs flex items-center justify-center gap-1"><X size={14}/> Reject</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1273,7 +1526,7 @@ export default function DashboardPage() {
                   <div className="text-[11px] font-bold opacity-70 mb-1.5 flex items-center gap-1.5"><CheckCircle2 size={12}/> Pending</div>
                   <div className="text-xl font-black">{pendingApprovals.length}</div>
                 </div>
-                <div className={`p-4 rounded-xl border ${t.border} ${t.cardBg}`}>
+                <div onClick={() => setActiveTab('users_management')} className={`p-4 rounded-xl border ${t.border} ${t.cardBg} cursor-pointer hover:border-amber-500 transition-colors shadow-sm`}>
                   <div className="text-[11px] font-bold opacity-70 mb-1.5 flex items-center gap-1.5"><UsersRound size={12}/> Total Users</div>
                   <div className="text-xl font-black">{adminStats.totalUsers}</div>
                 </div>
@@ -1285,22 +1538,14 @@ export default function DashboardPage() {
             )}
 
             {isAdmin && pendingApprovals.length > 0 && (
-              <div className={`mb-6 ${t.cardBg} border ${t.border} p-5 rounded-2xl`}>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-bold">Recent Pending Approvals</h3>
-                  <button onClick={() => setActiveTab('approvals')} className="text-[11px] font-bold underline opacity-70 hover:opacity-100">View All</button>
+              <div className={`mb-6 ${t.cardBg} border ${t.border} p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md`}>
+                <div>
+                  <h3 className="font-bold text-lg text-amber-500">Pending Approvals</h3>
+                  <p className="opacity-70 text-sm">You have {pendingApprovals.length} requests waiting to be reviewed.</p>
                 </div>
-                <div className="space-y-2">
-                  {pendingApprovals.slice(0,3).map((p) => (
-                    <div key={p.id} className={`flex justify-between items-center p-3 border ${t.border} rounded-xl hover:bg-slate-500/5`}>
-                      <div>
-                        <p className="font-bold">{p.user_reg}</p>
-                        <p className="text-[11px] opacity-70 font-mono">TID: {p.tid_number} | Rs {p.amount}</p>
-                      </div>
-                      <button onClick={() => handleAdminApprove(p.id, p.user_reg, p.amount)} className="bg-emerald-600 hover:bg-emerald-500 transition-colors text-white px-4 py-1.5 rounded-lg font-bold">Approve</button>
-                    </div>
-                  ))}
-                </div>
+                <button onClick={() => setActiveTab('approvals')} className="bg-amber-500 text-[#00122a] px-6 py-3 rounded-xl font-black shadow-lg hover:bg-amber-400 active:scale-95 transition-all whitespace-nowrap">
+                  Approve Pending Requests
+                </button>
               </div>
             )}
 
@@ -1689,7 +1934,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {paidSearchHistory.length === 0 && (
                  <div className={`col-span-full p-8 text-center rounded-2xl border ${t.border} ${t.cardBg} opacity-60`}>
-                    No paid searches executed yet.
+                   No paid searches executed yet.
                  </div>
               )}
               {paidSearchHistory.map((log) => (
