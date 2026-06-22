@@ -622,23 +622,36 @@ export default function DashboardPage() {
   };
 
   const handleSendMessage = async () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || !currentUser.reg) return;
     try {
       const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
       if (!receiver) return;
-
+  
       if (editingMsgId) {
-        await supabase.from('messages').update({ content: chatInput }).eq('id', editingMsgId);
+        await supabase.from('messages').update({ content: chatInput.trim() }).eq('id', editingMsgId);
         setEditingMsgId(null);
       } else {
+        // Force uppercase matching on the sender details to prevent RLS/foreign key validation drops
         await supabase.from('messages').insert({
-          sender_reg: currentUser.reg,
-          receiver_reg: receiver,
-          content: chatInput,
+          sender_reg: currentUser.reg.toUpperCase(),
+          receiver_reg: receiver.toUpperCase(),
+          content: chatInput.trim(),
           is_delivered: true,
           is_read: false
         });
       }
+      setChatInput("");
+      
+      // Optimistic fallback update for the user view if real-time engine throttles
+      if (!isAdmin) {
+        loadUserChat();
+      } else if (activeAdminChatUser) {
+        loadAdminSingleChat(activeAdminChatUser.reg, activeAdminChatUser.name);
+      }
+    } catch(e) {
+      showToast("Error", "Message delivery failed.", "error");
+    }
+  };
       setChatInput("");
     } catch(e) {}
   };
@@ -673,16 +686,30 @@ export default function DashboardPage() {
   const searchAdminChatUser = async () => {
     if (!chatSearchQuery.trim()) return;
     try {
-      const { data } = await supabase.from('users').select('reg, email, phone').or(`reg.ilike.%${chatSearchQuery}%,email.ilike.%${chatSearchQuery}%`).limit(5);
+      // Search the master students table so the admin can find ANY student on campus
+      const { data } = await supabase
+        .from('students')
+        .select('reg, name')
+        .or(`reg.ilike.%${chatSearchQuery}%,name.ilike.%${chatSearchQuery}%`)
+        .limit(5);
+        
       if (data && data.length > 0) {
-        const mapped = data.map(u => ({ reg: u.reg, name: maskEmail(u.email), unread: 0, last_msg_time: new Date().toISOString() }));
+        const mapped = data.map(u => ({ 
+          reg: u.reg, 
+          name: u.name, 
+          unread: 0, 
+          last_msg_time: new Date().toISOString() 
+        }));
         setAdminChatList(prev => {
           const combined = [...mapped, ...prev];
-          const unique = Array.from(new Map(combined.map(item => [item.reg, item])).values());
-          return unique;
+          return Array.from(new Map(combined.map(item => [item.reg, item])).values());
         });
+      } else {
+        showToast("Not Found", "No student matches this registration or name", "error");
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const showToast = (title: string, desc: string, type: 'error'|'info' = 'error') => {
