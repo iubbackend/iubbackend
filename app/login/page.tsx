@@ -396,6 +396,7 @@ function LoginContent() {
     const cleanEmail = email.toLowerCase().trim();
 
     try {
+      // 1. Verify user profile mapping exists in your custom public schema first
       const { data, error: matchError } = await supabase
         .from('users')
         .select('id')
@@ -409,12 +410,19 @@ function LoginContent() {
         return;
       }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      // 2. ⚡ FIX: Fire numeric token OTP handshake instead of standard absolute redirect link
+      const { error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: {
+          shouldCreateUser: false, // Prevents creating a fresh account if it doesn't match
+        },
+      });
       
       if (error) {
-        setErrorMsg('Failed to send OTP. Ensure Supabase Auth is configured.');
+        setErrorMsg(error.message || 'Failed to dispatch verification OTP.');
       } else {
-        setSuccessMsg('A reset token hash configuration was fired. Check Inbox/Spam.');
+        setSuccessMsg('A 6-digit verification code has been dispatched to your email. Check Inbox/Spam.');
+        setResendCountdown(60);
         setTimeout(() => {
           clearMessages();
           setView('reset_password');
@@ -422,7 +430,7 @@ function LoginContent() {
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
-    } finally {
+    } {
       setIsLoading(false);
     }
   };
@@ -442,12 +450,45 @@ function LoginContent() {
     const cleanRoll = rollNumber.trim().toUpperCase();
 
     try {
-      // 1. Match code confirmation profile credentials
+      // 1. ⚡ FIX: Validate code input context using 'email' type configuration
       const { error: otpError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
-        type: 'recovery',
+        type: 'email', // Changed from 'recovery' to match token validation handshake rules
       });
+
+      if (otpError) {
+        setErrorMsg(otpError.message || 'The verification code provided is invalid or has expired.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Perform raw encryption update over your manual custom schema tracking table
+      const hashedPass = await hashPassword(newPassword);
+      const { error: dbError } = await supabase
+        .from('users')
+        .update({ pass: hashedPass })
+        .ilike('reg', cleanRoll);
+
+      if (dbError) {
+        setErrorMsg('Auth session accepted, but user profile update rejected.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Sync authentication state identity platform parameters
+      await supabase.auth.updateUser({ password: newPassword });
+
+      setSuccessMsg('Your security credentials have been successfully updated. Routing to login...');
+      setTimeout(() => {
+        switchView('login');
+      }, 2500);
+    } catch (err) {
+      setErrorMsg('Critical password modification task exception.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
       if (otpError) {
         setErrorMsg(otpError.message || 'The recovery code provided is invalid or has expired.');
