@@ -13,7 +13,7 @@ async function hashPassword(password: string) {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email';
+type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email' | 'verify_otp';
 
 function LoginContent() {
   const router = useRouter();
@@ -28,6 +28,7 @@ function LoginContent() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [otpToken, setOtpToken] = useState('');
   
   // UI States
   const [errorMsg, setErrorMsg] = useState('');
@@ -125,160 +126,207 @@ function LoginContent() {
   };
 
   const handleLogin = async (e: React.FormEvent) => {
-      e.preventDefault();
-      clearMessages();
+    e.preventDefault();
+    clearMessages();
   
-      const cleanRollNumber = rollNumber.trim().toUpperCase();
+    const cleanRollNumber = rollNumber.trim().toUpperCase();
   
-      // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
-      const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
-      if (!regRegex.test(cleanRollNumber)) {
-        setErrorMsg('Invalid Registration Number format. Example: S22BSSE1M01101');
+    // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
+    const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
+    if (!regRegex.test(cleanRollNumber)) {
+      setErrorMsg('Invalid Registration Number format. Example: S25BARIN1M01118');
+      return;
+    }
+  
+    setIsLoading(true);
+    const supabase = getSupabase();
+    
+    try {
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('email')
+        .ilike('reg', cleanRollNumber)
+        .maybeSingle();
+  
+      if (userError || !userData) {
+        setErrorMsg('Invalid Roll Number or Password.');
+        setIsLoading(false);
         return;
       }
   
-      setIsLoading(true);
-      const supabase = getSupabase();
-    
-      try {
-        const { data: userData, error: userError } = await supabase
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: userData.email.toLowerCase().trim(), 
+        password: password, 
+      });
+  
+      if (authError) {
+        setErrorMsg('Invalid Roll Number or Password.');
+      } else {
+        const { data: profile } = await supabase
           .from('users')
-          .select('email')
+          .select('reg, phone, email')
           .ilike('reg', cleanRollNumber)
           .maybeSingle();
-    
-        if (userError || !userData) {
-          setErrorMsg('Invalid Roll Number or Password.');
-          setIsLoading(false);
-          return;
-        }
-    
-        const { error: authError } = await supabase.auth.signInWithPassword({
-          email: userData.email.toLowerCase().trim(), 
-          password: password, 
-        });
-    
-        if (authError) {
-          setErrorMsg('Invalid Roll Number or Password.');
-        } else {
-          const { data: profile } = await supabase
-            .from('users')
-            .select('reg, phone, email')
-            .ilike('reg', cleanRollNumber)
-            .maybeSingle();
-    
-          const userState = { 
-            reg: profile?.reg.toUpperCase() || cleanRollNumber, 
-            name: "Student", 
-            phone: profile?.phone || "", 
-            email: userData.email 
-          };
-          
-          localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
-          setSuccessMsg('Login successful! Welcome back.');
-          
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 500);
-        }
-      } catch (err) {
-        setErrorMsg('An unexpected error occurred.');
-      } finally {
+  
+        const userState = { 
+          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+          name: "Student", 
+          phone: profile?.phone || "", 
+          email: userData.email 
+        };
+        
+        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+        setSuccessMsg('Login successful! Welcome back.');
+        
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 500);
+      }
+    } catch (err) {
+      setErrorMsg('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+  
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+  
+    // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
+    const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
+    if (!regRegex.test(cleanRoll)) {
+      setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
+      return;
+    }
+  
+    // 2. STRICT GMAIL VALIDATION
+    const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
+    if (!gmailRegex.test(cleanEmail)) {
+      setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
+      return;
+    }
+  
+    const rawNumber = phone.replace(/-/g, '');
+    if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
+      setErrorMsg('You entered the wrong number. Enter your correct number otherwise your account can be compromised.');
+      return;
+    }
+  
+    setIsLoading(true);
+    const supabase = getSupabase();
+    const hashedPassword = await hashPassword(password);
+  
+    try {
+      // Sign up user inside Supabase Auth engine
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: password,
+      });
+  
+      if (authError) {
+        setErrorMsg(authError.message || 'Error setting up account authentication.');
         setIsLoading(false);
-      }
-    };
-  
-    const handleSignup = async (e: React.FormEvent) => {
-      e.preventDefault();
-      clearMessages();
-  
-      const cleanEmail = email.toLowerCase().trim();
-      const cleanRoll = rollNumber.trim().toUpperCase();
-  
-      // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
-      const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
-      if (!regRegex.test(cleanRoll)) {
-        setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
         return;
       }
   
-      // 2. STRICT GMAIL VALIDATION
-      const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
-      if (!gmailRegex.test(cleanEmail)) {
-        setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
-        return;
-      }
+      // Insert the main user account profile record into public schema
+      const { error } = await supabase
+        .from('users')
+        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
   
-      const rawNumber = phone.replace(/-/g, '');
-      if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
-        setErrorMsg('You entered the wrong number. Enter your correct number otherwise your account can be compromised.');
-        return;
-      }
-  
-      setIsLoading(true);
-      const supabase = getSupabase();
-      const hashedPassword = await hashPassword(password);
-  
-      try {
-        // Sign up user inside Supabase Auth engine
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: password,
-        });
-  
-        if (authError) {
-          setErrorMsg(authError.message || 'Error setting up account authentication.');
-          setIsLoading(false);
-          return;
-        }
-  
-        // Insert the main user account profile record into public schema
-        const { error } = await supabase
-          .from('users')
-          .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
-  
-        if (error) {
-          if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
-          else setErrorMsg('Error creating account. Please try again.');
-        } else {
-          
-          // SECURE REFERRAL ENGINE INTERACTION LINK
-          try {
-            const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
-          
-            if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
-              const cleanReferrer = activeReferrer.toUpperCase().trim();
-              
-              const { error: refError } = await supabase
-                .from('referrals')
-                .insert({
-                  referrer_reg: cleanReferrer,
-                  referred_reg: cleanRoll
-                });
-          
-              if (refError) {
-                console.error("Database rejected referral coupling insert:", refError);
-              } else {
-                if (typeof window !== "undefined") {
-                  localStorage.removeItem("referred_by");
-                }
+      if (error) {
+        if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
+        else setErrorMsg('Error creating account. Please try again.');
+      } else {
+        
+        // SECURE REFERRAL ENGINE INTERACTION LINK
+        try {
+          const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
+        
+          if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
+            const cleanReferrer = activeReferrer.toUpperCase().trim();
+            
+            const { error: refError } = await supabase
+              .from('referrals')
+              .insert({
+                referrer_reg: cleanReferrer,
+                referred_reg: cleanRoll
+              });
+        
+            if (refError) {
+              console.error("Database rejected referral coupling insert:", refError);
+            } else {
+              if (typeof window !== "undefined") {
+                localStorage.removeItem("referred_by");
               }
             }
-          } catch (creditErr) {
-            console.error("Failed to safely process automatic structural ledger updates:", creditErr);
           }
-  
-          setSuccessMsg('Account created! A verification OTP has been sent to your email.');
-          setTimeout(() => {
-            setView('login');
-          }, 3000);
+        } catch (creditErr) {
+          console.error("Failed to safely process automatic structural ledger updates:", creditErr);
         }
-      } catch (err) {
-        setErrorMsg('An unexpected error occurred.');
-      } finally {
-        setIsLoading(false);
+  
+        setSuccessMsg('Account created! A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!');
+        setTimeout(() => {
+          clearMessages();
+          setView('verify_otp');
+        }, 3500);
       }
-    };
+    } catch (err) {
+      setErrorMsg('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+    setIsLoading(true);
+
+    const supabase = getSupabase();
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanRollNumber = rollNumber.trim().toUpperCase();
+
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: otpToken.trim(),
+        type: 'signup',
+      });
+
+      if (error) {
+        setErrorMsg(error.message || 'Invalid or expired verification code.');
+      } else {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('reg, phone, email')
+          .ilike('reg', cleanRollNumber)
+          .maybeSingle();
+
+        const userState = { 
+          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+          name: "Student", 
+          phone: profile?.phone || "", 
+          email: cleanEmail 
+        };
+        
+        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+        setSuccessMsg('Email verified successfully! Welcome to the portal.');
+        
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1500);
+      }
+    } catch (err) {
+      setErrorMsg('An unexpected error occurred during verification.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -389,7 +437,7 @@ function LoginContent() {
           <div className="mb-8 text-center relative">
             {view !== 'login' && (
               <button 
-                onClick={() => switchView(view === 'forgot_email' ? 'forgot_password' : 'login')}
+                onClick={() => switchView(view === 'verify_otp' ? 'signup' : view === 'forgot_email' ? 'forgot_password' : 'login')}
                 type="button"
                 className="absolute left-0 top-1 text-gray-500 hover:text-gray-900 dark:text-blue-300/70 dark:hover:text-white"
               >
@@ -401,12 +449,14 @@ function LoginContent() {
               {view === 'signup' && 'Create Account'}
               {view === 'forgot_password' && 'Reset Password'}
               {view === 'forgot_email' && 'Find Email'}
+              {view === 'verify_otp' && 'Verify OTP'}
             </h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-blue-300/70">
               {view === 'login' && 'Sign in using your Roll Number'}
               {view === 'signup' && 'Register your details below'}
               {view === 'forgot_password' && 'Enter details to receive an OTP'}
               {view === 'forgot_email' && 'Enter your phone to reveal your email'}
+              {view === 'verify_otp' && 'Enter the 6-digit verification code'}
             </p>
           </div>
 
@@ -477,7 +527,6 @@ function LoginContent() {
                   Forgot Password?
                 </button>
                 
-                {/* UPGRADED ELEVATED BUTTON CALL-TO-ACTION FOR SIGNUP */}
                 <div className="w-full text-center space-y-2">
                   <p className="text-xs text-gray-500 dark:text-blue-300/50 font-medium">New to the portal layout?</p>
                   <button 
@@ -596,6 +645,44 @@ function LoginContent() {
               <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-purple-600 hover:bg-purple-700 text-white py-3 text-sm font-bold shadow-md disabled:opacity-70 transition-all">
                 {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Find My Email'}
               </button>
+            </form>
+          )}
+
+          {/* VIEW 5: OTP VERIFICATION */}
+          {view === 'verify_otp' && (
+            <form onSubmit={handleVerifyOtp} className="space-y-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">
+                  Enter 6-Digit Verification Code
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Lock size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    value={otpToken}
+                    onChange={(e) => setOtpToken(e.target.value)}
+                    placeholder="e.g. 123456"
+                    maxLength={6}
+                    required
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500 font-mono tracking-widest text-center text-lg font-bold"
+                  />
+                </div>
+                <p className="mt-3 text-[11px] text-amber-600 dark:text-amber-400 font-semibold text-center">
+                  ⚠️ Note: Check your <b>Spam or Junk email folder</b> if you don't see the code within 60 seconds.
+                </p>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-gradient-to-r dark:from-amber-500 dark:to-amber-600 dark:hover:from-amber-400 dark:hover:to-amber-500 dark:text-[#00122a] px-4 py-3 text-sm font-black shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify & Activate'}
+              </button>
+
+              <div className="text-center pt-2">
+                <button type="button" onClick={() => switchView('signup')} className="text-xs font-bold text-blue-600 hover:underline dark:text-amber-400">
+                  Back to Registration
+                </button>
+              </div>
             </form>
           )}
 
