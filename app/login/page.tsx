@@ -231,6 +231,12 @@ function LoginContent() {
       const { error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
+        options: {
+          data: {
+            reg: cleanRoll,
+            phone: rawNumber
+          }
+        }
       });
   
       if (authError) {
