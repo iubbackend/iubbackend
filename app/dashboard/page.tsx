@@ -214,7 +214,7 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .ilike("email", user.email.trim()) 
+          .ilike("email", session.user.email.trim()) 
           .maybeSingle();
         
         if (userRecord?.reg) {
