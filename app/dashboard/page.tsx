@@ -180,7 +180,7 @@ export default function DashboardPage() {
         document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
     });
     await supabase.auth.signOut();
-    router.push('/signup');
+    router.push('/login');
   };
 
   useEffect(() => {
