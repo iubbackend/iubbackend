@@ -176,7 +176,8 @@ function LoginContent() {
         
         localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
         setSuccessMsg('Login successful! Welcome back.');
-        
+        router.push('/dashboard');
+      }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
     } finally {
