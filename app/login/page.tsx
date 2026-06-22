@@ -430,7 +430,7 @@ function LoginContent() {
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
-    } {
+    } finally {
       setIsLoading(false);
     }
   };
