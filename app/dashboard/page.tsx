@@ -214,7 +214,7 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .eq("email", user.email)
+          .ilike("email", user.email.trim()) // Case-insensitive comparison + trimmed spacing
           .maybeSingle();
         
         if (userRecord?.reg) {
