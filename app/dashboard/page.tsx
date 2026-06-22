@@ -202,9 +202,10 @@ export default function DashboardPage() {
         const cachedStats = localStorage.getItem('iub_adminStats');
         if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
 
-        const { data: { session } } = await supabase.auth.getSession();
+        // ⚡ FIX 1: Use getUser() to securely verify session auth context from server headers on reload
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-        if (!session?.user?.email) {
+        if (authError || !user?.email) {
           router.push('/login');
           return;
         }
@@ -213,13 +214,15 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .eq("email", session.user.email)
+          .eq("email", user.email)
           .maybeSingle();
         
         if (userRecord?.reg) {
-          actualReg = userRecord.reg;
+          actualReg = userRecord.reg; 
         } else {
-          forceLogout();
+          // ⚡ FIX 2: Degrade gracefully. Don't call forceLogout() if network sync lags
+          console.warn("User profile data not returned from public ledger schema yet.");
+          showToast("Profile Sync", "Could not verify your registration roll data. Please refresh.", "error");
           return;
         }
         
