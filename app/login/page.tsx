@@ -202,7 +202,7 @@ function LoginContent() {
     const hashedPassword = await hashPassword(password);
 
     try {
-      // 1. Sign up the user inside Supabase Auth
+      // 1. Sign up user inside Supabase Auth engine
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
@@ -214,7 +214,7 @@ function LoginContent() {
         return;
       }
 
-      // 2. Insert the main user account profile record
+      // 2. Insert the main user account profile record into public schema
       const { error } = await supabase
         .from('users')
         .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
@@ -224,15 +224,15 @@ function LoginContent() {
         else setErrorMsg('Error creating account. Please try again.');
       } else {
         
-        // 3. SECURE REFERRAL ENGINE COUPLING
+        // 3. SECURE REFERRAL ENGINE INTERACTION LINK
         try {
-          // Volatile memory safety: Fall back to state variable if Incognito flushes storage
+          // Fallback array chain ensures referred string is never dropped in Incognito views
           const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
           
           if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
             const cleanReferrer = activeReferrer.toUpperCase().trim();
             
-            // Execute the backend insert pipeline securely
+            // Push direct record to referrals table - This wakes up the DB trigger instantly!
             const { error: refError } = await supabase
               .from('referrals')
               .insert({
@@ -241,16 +241,16 @@ function LoginContent() {
               });
 
             if (refError) {
-              console.error("Database rejected referral coupling insert:", refError);
+              console.error("Referral registration logging rejected:", refError);
             } else {
-              console.log(`Referral saved! ${cleanReferrer} invited ${cleanRoll}`);
+              console.log(`Successfully mapped referral tracking: ${cleanReferrer} -> ${cleanRoll}`);
               if (typeof window !== "undefined") {
                 localStorage.removeItem("referred_by");
               }
             }
           }
         } catch (creditErr) {
-          console.error("Failed to safely process backend automatic tracking chain:", creditErr);
+          console.error("Failed to safely process automatic structural ledger updates:", creditErr);
         }
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
@@ -264,7 +264,6 @@ function LoginContent() {
       setIsLoading(false);
     }
   };
-
   const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
