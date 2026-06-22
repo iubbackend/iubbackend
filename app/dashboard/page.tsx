@@ -202,7 +202,7 @@ export default function DashboardPage() {
         const cachedStats = localStorage.getItem('iub_adminStats');
         if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
 
-        // ⚡ FIX 1: Use getUser() to securely verify session auth context from server headers on reload
+        // Securely verify session auth context from server headers
         const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user?.email) {
@@ -214,13 +214,13 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .ilike("email", user.email.trim()) // Case-insensitive comparison + trimmed spacing
+          .ilike("email", user.email.trim()) 
           .maybeSingle();
         
         if (userRecord?.reg) {
           actualReg = userRecord.reg; 
         } else {
-          // ⚡ FIX 2: Degrade gracefully. Let the code fall through to update the UI!
+          // Degrade gracefully so the UI doesn't get stuck loading
           console.warn("User profile data not returned from public ledger schema yet.");
           showToast("Profile Sync", "Could not verify your registration roll data. Please refresh.", "error");
           actualReg = "UNKNOWN"; 
@@ -228,7 +228,6 @@ export default function DashboardPage() {
         
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
-          // Strip all hidden spaces to ensure a perfect match
           const safeReg = actualReg.replace(/\s+/g, '').trim();
 
           const { data: studentNameRes } = await supabase
@@ -286,7 +285,6 @@ export default function DashboardPage() {
         setFilterOptions(newFilters);
         localStorage.setItem('iub_filterOptions', JSON.stringify(newFilters));
 
-        // ⚡ THE ADMIN MISMATCH FIX IS HERE
         if (actualReg.toUpperCase() === ADMIN_REG) {
           loadRealAdminData();
           loadAdminChatList();
