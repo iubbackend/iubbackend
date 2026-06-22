@@ -17,7 +17,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
-const ADMIN_REG = "S20BSCS1M01001";
+// Synchronized with structural backend ledger arrays
+const ADMIN_REGS = ["S25BARIN1M01118", "S20BSCS1M01001"];
 const SEARCH_COST = 850; 
 
 type SearchMode = "Roll Number" | "Name";
@@ -65,7 +66,8 @@ export default function DashboardPage() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading...", phone: "", email: "" });
   
-  const isAdmin = currentUser.reg === ADMIN_REG;
+  const isAdmin = ADMIN_REGS.includes(currentUser.reg.toUpperCase());
+  const primaryAdminReg = ADMIN_REGS[1]; // Falls back to standard master ID string
 
   const [credits, setCredits] = useState(0);
   const [freeAttempts, setFreeAttempts] = useState(4);
@@ -112,8 +114,6 @@ export default function DashboardPage() {
 
   // USER COURSES STATES
   const [editableCourses, setEditableCourses] = useState<any[]>([]);
-
-    // Tracks which specific course ID is currently being edited and its live values
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [courseForm, setCourseForm] = useState({ name: "", credits: 3 });
 
@@ -184,7 +184,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         localStorage.clear(); 
         router.push('/login');
@@ -202,7 +202,6 @@ export default function DashboardPage() {
         const cachedStats = localStorage.getItem('iub_adminStats');
         if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
 
-        // Securely verify session auth context from server headers
         const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user?.email) {
@@ -214,13 +213,12 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .ilike("email", user.email.trim()) // ✅ Changed to use the correct 'user' object variable
+          .ilike("email", user.email.trim())
           .maybeSingle();
         
         if (userRecord?.reg) {
           actualReg = userRecord.reg; 
         } else {
-          // Degrade gracefully so the UI doesn't get stuck loading
           console.warn("User profile data not returned from public ledger schema yet.");
           showToast("Profile Sync", "Could not verify your registration roll data. Please refresh.", "error");
           actualReg = "UNKNOWN"; 
@@ -261,8 +259,8 @@ export default function DashboardPage() {
             localStorage.setItem("iub_freeAttempts", attempts.toString());
           }
           
-          if (actualReg.toUpperCase() !== ADMIN_REG) {
-             const channel = supabase.channel('credits_update')
+          if (!ADMIN_REGS.includes(actualReg.toUpperCase())) {
+             supabase.channel('credits_update')
                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_credits', filter: `user_reg=eq.${actualReg}` }, (payload) => {
                   setCredits(payload.new.credits);
                   localStorage.setItem("iub_credits", payload.new.credits.toString());
@@ -285,7 +283,7 @@ export default function DashboardPage() {
         setFilterOptions(newFilters);
         localStorage.setItem('iub_filterOptions', JSON.stringify(newFilters));
 
-        if (actualReg.toUpperCase() === ADMIN_REG) {
+        if (ADMIN_REGS.includes(actualReg.toUpperCase())) {
           loadRealAdminData();
           loadAdminChatList();
         } else {
@@ -310,8 +308,8 @@ export default function DashboardPage() {
         const state = chatStateRef.current;
         
         const isActiveChat = state.isAdmin 
-          ? (state.activeAdminChatUser && ((newMsg.sender_reg === state.activeAdminChatUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === state.activeAdminChatUser.reg)))
-          : ((newMsg.sender_reg === state.currentUser.reg && newMsg.receiver_reg === ADMIN_REG) || (newMsg.sender_reg === ADMIN_REG && newMsg.receiver_reg === state.currentUser.reg));
+          ? (state.activeAdminChatUser && ((newMsg.sender_reg === state.activeAdminChatUser.reg && ADMIN_REGS.includes(newMsg.receiver_reg.toUpperCase())) || (ADMIN_REGS.includes(newMsg.sender_reg.toUpperCase()) && newMsg.receiver_reg === state.activeAdminChatUser.reg)))
+          : ((newMsg.sender_reg === state.currentUser.reg && ADMIN_REGS.includes(newMsg.receiver_reg.toUpperCase())) || (ADMIN_REGS.includes(newMsg.sender_reg.toUpperCase()) && newMsg.receiver_reg === state.currentUser.reg));
 
         if (isActiveChat) {
           setChatMessages(prev => {
@@ -320,13 +318,7 @@ export default function DashboardPage() {
           });
           
           if (newMsg.receiver_reg === state.currentUser.reg && !newMsg.is_read) {
-            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {
-              if (state.isAdmin && state.activeAdminChatUser) {
-                // Ensure we don't accidentally reload and wipe local optimistic updates
-              } else if (!state.isAdmin) {
-                // Same here
-              }
-            });
+            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
           }
         } else if (newMsg.receiver_reg === state.currentUser.reg) {
           setHasUnreadMessages(true);
@@ -362,11 +354,10 @@ export default function DashboardPage() {
     if (activeTab === "users_management" && isAdmin) loadManageUsers(0);
     if (activeTab === "edit_courses" && !isAdmin) loadEditableCourses();
     
-    // ⚡ FIX: Force Admin data to refresh when navigating between admin tabs
     if ((activeTab === "approvals" || activeTab === "leaderboard" || activeTab === "home") && isAdmin) {
       loadRealAdminData();
     }
-  }, [activeTab, isAdmin]); // Added isAdmin to the dependency array
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -378,7 +369,6 @@ export default function DashboardPage() {
     try {
       const { data: pendingDataRaw } = await supabase.from('payments_record').select('*').eq('status', 'pending').order('created_at', { ascending: false });
       
-      // Fetch users dynamically to enrich pending approvals with Phone/Email/Name beautifully
       let enrichedPending = pendingDataRaw || [];
       if (enrichedPending.length > 0) {
         const regs = enrichedPending.map((p: any) => p.user_reg);
@@ -447,9 +437,11 @@ export default function DashboardPage() {
     try {
       const { data: student } = await supabase.from('students').select('id').eq('reg', currentUser.reg).single();
       if (!student) return;
+      
+      // Select correctly matches columns mapping definitions inside 'courses' table schema natively
       const { data: results } = await supabase.from('results').select('id, semester, subject_id(id, course_code, course_name, credit_hours)').eq('student_id', student.id);
       
-      const unique = [];
+      const unique: any[] = [];
       const seen = new Set();
       results?.forEach((r: any) => {
          if(r.subject_id && !seen.has(r.subject_id.id)) {
@@ -466,18 +458,6 @@ export default function DashboardPage() {
 
       setEditableCourses(sorted);
     } catch(e) {}
-  };
-
-  const handleCourseUpdate = async (subjectId: string, newName: string, newCredits: string) => {
-    try {
-      const formattedName = newName.replace(/\b\w/g, c => c.toUpperCase());
-      const cr = Number(newCredits);
-      if (![2, 3, 4].includes(cr)) return showToast('Error', 'Credit hours must be 2, 3, or 4', 'error');
-
-      await supabase.from('subjects').update({ course_name: formattedName, credit_hours: cr }).eq('id', subjectId);
-      showToast('Success', 'Course details updated successfully!', 'info');
-      loadEditableCourses();
-    } catch(e) { showToast('Error', 'Update failed.', 'error'); }
   };
 
   const loadCreditsHistory = async (page = 1) => {
@@ -498,7 +478,7 @@ export default function DashboardPage() {
       if (page === 1) localStorage.setItem('iub_historyLogs', JSON.stringify(newLogs));
     } catch (err) {
       console.error("Failed to load history", err);
-    } finally {
+    } final {
       setCreditsTabLoading(false);
     }
   };
@@ -547,8 +527,6 @@ const handleAdminReject = async (paymentId: string) => {
             if (error) throw error;
 
             showToast("Rejected", "Request rejected successfully.", "info");
-            
-            // Explicitly force clear the row from the local view immediately
             setPendingApprovals(prev => prev.filter(p => p.id !== paymentId));
             loadRealAdminData();
         } catch(e) { 
@@ -569,8 +547,6 @@ const handleAdminReject = async (paymentId: string) => {
             if (error) throw error;
 
             showToast("Modified", `Amount updated to Rs ${newAmount}`, "info");
-            
-            // Optimistically update the single modified row locally
             setPendingApprovals(prev => prev.map(p => p.id === paymentId ? { ...p, amount: Number(newAmount) } : p));
             loadRealAdminData();
         } catch(e) { 
@@ -620,7 +596,7 @@ const handleAdminReject = async (paymentId: string) => {
     setHasUnreadMessages(false);
     try {
       const { data } = await supabase.from('messages').select('*')
-        .or(`sender_reg.eq.${currentUser.reg},receiver_reg.eq.${currentUser.reg}`)
+        .or(`sender_reg.eq.${currentUser.reg},receiver_reg.eq.${primaryAdminReg}`)
         .order('created_at', { ascending: true });
       setChatMessages(data || []);
       await supabase.from('messages').update({ is_read: true }).eq('receiver_reg', currentUser.reg).eq('is_read', false);
@@ -642,10 +618,10 @@ const handleAdminReject = async (paymentId: string) => {
     setActiveAdminChatUser({ reg, name });
     try {
       const { data } = await supabase.from('messages').select('*')
-        .or(`and(sender_reg.eq.${reg},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${reg})`)
+        .or(`and(sender_reg.eq.${reg},receiver_reg.eq.${primaryAdminReg}),and(sender_reg.eq.${primaryAdminReg},receiver_reg.eq.${reg})`)
         .order('created_at', { ascending: true });
       setChatMessages(data || []);
-      await supabase.from('messages').update({ is_read: true }).eq('sender_reg', reg).eq('receiver_reg', ADMIN_REG);
+      await supabase.from('messages').update({ is_read: true }).eq('sender_reg', reg).eq('receiver_reg', primaryAdminReg);
       loadAdminChatList();
     } catch (e) {}
   };
@@ -654,10 +630,9 @@ const handleAdminReject = async (paymentId: string) => {
     if (!chatInput.trim() || !currentUser.reg) return;
     
     const textToSend = chatInput.trim();
-    const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
+    const receiver = isAdmin ? activeAdminChatUser?.reg : primaryAdminReg;
     if (!receiver) return;
 
-    // 1. Create an instant local "Optimistic" copy of the message for a snappy UI
     const temporaryId = 'temp-' + Date.now();
     const localOptimisticMsg: ChatMessage = {
       id: temporaryId,
@@ -666,10 +641,9 @@ const handleAdminReject = async (paymentId: string) => {
       content: textToSend,
       created_at: new Date().toISOString(),
       is_read: false,
-      is_delivered: false // Displays single check mark locally while saving
+      is_delivered: false 
     };
 
-    // Force append directly into the UI array state container immediately
     setChatMessages(prev => {
       if (prev.find(m => m.content === textToSend && m.id.startsWith('temp-'))) return prev;
       return [...prev, localOptimisticMsg];
@@ -680,11 +654,8 @@ const handleAdminReject = async (paymentId: string) => {
       if (editingMsgId) {
         await supabase.from('messages').update({ content: textToSend }).eq('id', editingMsgId);
         setEditingMsgId(null);
-        
-        // Local state mutation block for edited records
         setChatMessages(prev => prev.map(m => m.id === editingMsgId ? { ...m, content: textToSend } : m));
       } else {
-        // 2. Commit safely to the Supabase backend database
         const { data: serverMsg, error } = await supabase.from('messages').insert({
           sender_reg: currentUser.reg.toUpperCase(),
           receiver_reg: receiver.toUpperCase(),
@@ -695,7 +666,6 @@ const handleAdminReject = async (paymentId: string) => {
 
         if (error) throw error;
 
-        // 3. Swap the placeholder message with the authenticated server message
         if (serverMsg) {
           setChatMessages(prev => 
             prev.map(m => m.id === temporaryId ? (serverMsg as ChatMessage) : m)
@@ -703,14 +673,12 @@ const handleAdminReject = async (paymentId: string) => {
         }
       }
 
-      // Re-trigger global sync states
       if (isAdmin) {
         loadAdminChatList();
       }
     } catch(e) {
-      // Rollback configuration if network drops
       setChatMessages(prev => prev.filter(m => m.id !== temporaryId));
-      setChatInput(textToSend); // Put back text so user doesn't lose it
+      setChatInput(textToSend);
       showToast("Error", "Message transmission failed. Please retry.", "error");
     }
   };
@@ -726,7 +694,7 @@ const handleAdminReject = async (paymentId: string) => {
   const handleAdminDeleteEntireChat = async () => {
     if (!activeAdminChatUser) return;
     try {
-      await supabase.from('messages').delete().or(`and(sender_reg.eq.${activeAdminChatUser.reg},receiver_reg.eq.${ADMIN_REG}),and(sender_reg.eq.${ADMIN_REG},receiver_reg.eq.${activeAdminChatUser.reg})`);
+      await supabase.from('messages').delete().or(`and(sender_reg.eq.${activeAdminChatUser.reg},receiver_reg.eq.${primaryAdminReg}),and(sender_reg.eq.${primaryAdminReg},receiver_reg.eq.${activeAdminChatUser.reg})`);
       setActiveAdminChatUser(null);
       loadAdminChatList();
       showToast("Deleted", "Entire chat deleted.", "info");
@@ -745,7 +713,6 @@ const handleAdminReject = async (paymentId: string) => {
   const searchAdminChatUser = async () => {
     if (!chatSearchQuery.trim()) return;
     try {
-      // Search the master students table so the admin can find ANY student on campus
       const { data } = await supabase
         .from('students')
         .select('reg, name')
@@ -802,7 +769,7 @@ const handleAdminReject = async (paymentId: string) => {
   };
 
   const selectStyles = {
-    control: (base: any, state: any) => ({
+    control: (base: any) => ({
       ...base,
       background: 'transparent',
       borderColor: 'transparent',
@@ -854,17 +821,16 @@ const handleAdminReject = async (paymentId: string) => {
 
     if (!activeQuery.trim()) return;
 
-    // --- SERVER-SIDE RATE LIMIT GUARD ---
     if (!isAdmin) {
       try {
         const { data: isAllowed, error: rateError } = await supabase.rpc('check_rate_limit', {
           p_user_reg: currentUser.reg,
-          p_max_actions: 5,        // Max searches allowed
-          p_window_seconds: 60     // Within a rolling 60-second window
+          p_max_actions: 5,        
+          p_window_seconds: 60     
         });
 
         if (rateError || !isAllowed) {
-          showToast("Slow Down", "Rate limit exceeded. Please wait a moment before trying again.", "error");
+          showToast("Slow Down", "Rate limit exceeded. Please wait a moment.", "error");
           setIsSearching(false);
           return;
         }
@@ -1219,13 +1185,13 @@ const handleAdminReject = async (paymentId: string) => {
         </div>
       </header>
 
-      {/* THIN NANO SUB-HEADER */}
+      {/* THIN SUB-HEADER */}
       <div className={`w-full py-1.5 text-[10px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-4 border-b ${t.border} ${theme === 'light' ? 'bg-slate-100/80 text-slate-600' : 'bg-[#000a1a]/80 text-blue-400/60'}`}>
-        <span>Check Result Before time</span>
+        <span>Check Result Before Time</span>
         <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
-        <span>Marks</span>
+        <span>Detailed Marks</span>
         <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
-        <span>Other's Result</span>
+        <span>Directory Lookup</span>
       </div>
 
       {/* SIDEBAR DRAWER */}
@@ -1234,7 +1200,7 @@ const handleAdminReject = async (paymentId: string) => {
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
             <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.3 }}
-              className={`fixed top-0 left-0 h-full w-64 ${theme==='light' ? 'bg-white' : 'bg-[#00173d]'} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
+              className={`fixed top-0 left-0 h-full w-64 ${theme==='light' ? 'bg-white' : 'bg-[#00173d]'}' border-r ${t.border} z-50 flex flex-col shadow-2xl`}
             >
               <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-3">
@@ -1274,7 +1240,7 @@ const handleAdminReject = async (paymentId: string) => {
                 {!isAdmin && (
                   <>
                     <button onClick={() => { setActiveTab('edit_courses'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'edit_courses' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
-                      <BookOpen size={18} /> Edit Courses Details
+                      <BookOpen size={18} /> Edit Course details
                     </button>
                     <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <CreditCard size={18} /> Credits & Wallet
@@ -1329,12 +1295,10 @@ const handleAdminReject = async (paymentId: string) => {
               <div className="space-y-8">
                 {Array.from(new Set(editableCourses.map(c => c.sem || "General Data"))).map((semesterName) => (
                   <div key={semesterName} className="space-y-3">
-                    {/* Semester Header Card */}
                     <div className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
                       {getSemesterNumber(currentUser.reg, semesterName)}
                     </div>
         
-                    {/* Courses inside this specific semester */}
                     <div className="grid grid-cols-1 gap-3">
                       {editableCourses.filter(c => (c.sem || "General Data") === semesterName).map((course) => {
                         const isEditingThis = editingCourseId === course.id;
@@ -1381,7 +1345,6 @@ const handleAdminReject = async (paymentId: string) => {
                                 )}
                               </div>
         
-                              {/* Inline Control Buttons right under the input interaction wrapper */}
                               <div className="flex items-center gap-1.5 pt-3 sm:pt-0">
                                 {isEditingThis ? (
                                   <>
@@ -1398,10 +1361,10 @@ const handleAdminReject = async (paymentId: string) => {
                                         }
                                         try {
                                           const { error } = await supabase
-                                            .from('courses') // Changed from 'subjects' to 'courses'
+                                            .from('courses') 
                                             .update({ 
                                               course_name: courseForm.name.trim(), 
-                                              credit_hours: Number(courseForm.credits) // Explicitly cast to integer to prevent type dropping
+                                              credit_hours: Number(courseForm.credits) 
                                             })
                                             .eq('id', course.id);
         
@@ -1409,7 +1372,7 @@ const handleAdminReject = async (paymentId: string) => {
                                           
                                           showToast('Success', 'Course details synced to cloud.', 'info');
                                           setEditingCourseId(null);
-                                          loadEditableCourses(); // Refresh live state container
+                                          loadEditableCourses(); 
                                         } catch(e) {
                                           showToast('Error', 'Database synchronization failed.', 'error');
                                         }
@@ -1508,7 +1471,7 @@ const handleAdminReject = async (paymentId: string) => {
                    <input type="text" placeholder="Enter Registration Number" value={manualPay.reg} onChange={e=>setManualPay({...manualPay, reg:e.target.value})} className={`flex-1 w-full ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 focus:outline-none ${t.inputFocus}`} />
                    <input type="number" placeholder="Enter Equivalent Rs" value={manualPay.amount} onChange={e=>setManualPay({...manualPay, amount:e.target.value})} className={`w-full sm:w-48 ${t.inputBg} border ${t.border} rounded-xl py-2.5 px-4 focus:outline-none ${t.inputFocus}`} />
                    <button onClick={handleAdminManualAward} className={`${t.btnPrimary} w-full sm:w-auto font-bold rounded-xl px-6 py-2.5 shadow-md flex items-center justify-center gap-2`}>
-                      Award Credits
+                     Award Credits
                    </button>
                 </div>
              </div>
@@ -1969,7 +1932,6 @@ const handleAdminReject = async (paymentId: string) => {
                                   </div>
                                 ))}
 
-                                {/* Upsell Lock Button for Free mode users */}
                                 {!studentDetails[0]?.canCalculate && (
                                    <motion.button 
                                      onClick={(e) => {
@@ -2082,22 +2044,23 @@ const handleAdminReject = async (paymentId: string) => {
                      {historyLogs.deposits.length === 0 && historyLogs.usage.length === 0 && !creditsTabLoading && (
                        <tr><td colSpan={4} className="px-4 py-8 text-center opacity-50">No recent activity found.</td></tr>
                      )}
-                      {/* REPLACE the map internal row mapping line for deposits inside your table body layout: */}
-                      {historyLogs.deposits.map((dep, i) => (
-                        <tr key={`dep-${i}`} className={t.rowHover}>
-                          <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(dep.created_at).toLocaleDateString()}</td>
-                          <td className="px-4 py-3 font-semibold text-emerald-500 flex items-center gap-1.5">
-                            <ArrowRight size={12} className="rotate-45"/> 
-                            Deposit
-                          </td>
-                          <td className="px-4 py-3 opacity-80">
-                            Rs {dep.amount} via {dep.account_name}
-                          </td>
-                          <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                            {dep.status.toUpperCase()}
-                          </td>
-                        </tr>
-                      ))}
+                     {historyLogs.deposits.map((dep, i) => (
+                       <tr key={`dep-${i}`} className={t.rowHover}>
+                         <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(dep.created_at).toLocaleDateString()}</td>
+                         <td className="px-4 py-3 font-semibold text-emerald-500 flex items-center gap-1.5">
+                           <ArrowRight size={12} className="rotate-45"/> 
+                           {dep.package_id === 'referral_reward' ? 'Referral Reward' : 'Deposit'}
+                         </td>
+                         <td className="px-4 py-3 opacity-80">
+                           {dep.package_id === 'referral_reward' 
+                             ? `Earned 850 credits via registration invite bonus.` 
+                             : `Rs ${dep.amount} via ${dep.account_name}`}
+                         </td>
+                         <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                           {dep.package_id === 'referral_reward' ? '+ 850 CR' : `Rs ${dep.amount}`}
+                         </td>
+                       </tr>
+                     ))}
                      {historyLogs.usage.map((usg, i) => (
                        <tr key={`usg-${i}`} className={t.rowHover}>
                          <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(usg.created_at).toLocaleDateString()}</td>
@@ -2122,11 +2085,11 @@ const handleAdminReject = async (paymentId: string) => {
           </motion.div>
         )}
 
-        {/* TAB: SEARCH HISTORY (ONLY SHOWN TO NORMAL USERS) */}
+        {/* TAB: SEARCH HISTORY */}
         {!isAdmin && activeTab === "history" && (
           <div className="space-y-5">
             <h3 className="font-bold text-xl mb-4 flex items-center gap-2.5"><History className={t.primary} size={24}/> Paid Search History</h3>
-            <p className="opacity-70 mb-5 max-w-2xl">A complete record of your executed paid searches. Clicking 'See Result' will automatically re-run the search in the portal.</p>
+            <p className="opacity-70 mb-5 max-w-2xl">A complete record of your executed paid searches. Clicking 'See Result' will re-run the search in the portal.</p>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {paidSearchHistory.length === 0 && (
@@ -2149,14 +2112,14 @@ const handleAdminReject = async (paymentId: string) => {
           </div>
         )}
 
-        {/* TAB: REFERRAL (ONLY SHOWN TO NORMAL USERS) */}
+        {/* TAB: REFERRAL */}
         {!isAdmin && activeTab === "referral" && (
           <div className={`${t.cardBg} border ${t.border} p-8 rounded-[1.5rem] text-center shadow-md`}>
             <div className={`w-16 h-16 rounded-2xl mx-auto mb-5 flex items-center justify-center bg-gradient-to-br from-[#0056b3] to-[#00348c] shadow-lg text-white`}>
               <Share2 size={30} />
             </div>
             <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
-            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up and buy credits, you instantly get a 20% bonus of their purchase added to your wallet!</p>
+            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up, you instantly earn 850 reward credits added to your wallet balance!</p>
             <div className={`max-w-md mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono flex justify-between items-center pl-4 shadow-inner`}>
               <span className="truncate opacity-80 font-semibold text-[12px]">https://iubbackend.vercel.app/ref/{currentUser.reg}</span>
               <button onClick={() => { navigator.clipboard.writeText(`https://iubbackend.vercel.app/ref/${currentUser.reg}`); showToast("Copied!", "Referral link copied to clipboard", "info"); }} className={`${t.btnPrimary} px-5 py-2 rounded-lg font-bold shadow-md active:scale-95 transition-transform`}>Copy</button>
