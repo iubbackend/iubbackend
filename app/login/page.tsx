@@ -540,7 +540,7 @@ function LoginContent() {
               {view === 'signup' && 'Register your details below'}
               {view === 'forgot_password' && 'Enter details to receive an OTP'}
               {view === 'forgot_email' && 'Enter your phone to reveal your email'}
-              {view === 'verify_otp' && 'Enter the 6-digit verification code'}
+              {view === 'verify_otp' && 'Enter the 8-digit verification code'}
               {view === 'reset_password' && 'Complete your access authorization configuration'}
             </p>
           </div>
@@ -570,19 +570,19 @@ function LoginContent() {
           {view === 'login' && (
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">Roll Number</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                    <User size={18} />
-                  </div>
-                  <input
-                    type="text"
-                    value={rollNumber}
-                    onChange={(e) => setRollNumber(e.target.value.toUpperCase())}
-                    placeholder="e.g. F22BAID1M011"
-                    required
-                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
-                  />
+               <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">
+                  Enter 8-Digit Verification Code
+                </label>
+                ...
+                <input
+                  type="text"
+                  value={otpToken}
+                  onChange={(e) => setOtpToken(e.target.value)}
+                  placeholder="e.g. 12345678"
+                  maxLength={8}
+                  required
+                  className="..."
+                />
                 </div>
               </div>
 
