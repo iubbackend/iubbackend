@@ -242,7 +242,8 @@ function LoginContent() {
         return;
       }
   
-      setSuccessMsg('A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!');
+      let formattedMsg = 'A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!';
+      setSuccessMsg(formattedMsg);
       setResendCountdown(60);
       setTimeout(() => {
         clearMessages();
@@ -570,19 +571,19 @@ function LoginContent() {
           {view === 'login' && (
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
-               <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">
-                  Enter 8-Digit Verification Code
-                </label>
-                ...
-                <input
-                  type="text"
-                  value={otpToken}
-                  onChange={(e) => setOtpToken(e.target.value)}
-                  placeholder="e.g. 12345678"
-                  maxLength={8}
-                  required
-                  className="..."
-                />
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">Roll Number</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <User size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    value={rollNumber}
+                    onChange={(e) => setRollNumber(e.target.value.toUpperCase())}
+                    placeholder="e.g. F22BAID1M011"
+                    required
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
+                  />
                 </div>
               </div>
 
@@ -738,7 +739,7 @@ function LoginContent() {
             <form onSubmit={handleVerifyOtp} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">
-                  Enter 6-Digit Verification Code
+                  Enter 8-Digit Verification Code
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
@@ -748,8 +749,8 @@ function LoginContent() {
                     type="text"
                     value={otpToken}
                     onChange={(e) => setOtpToken(e.target.value)}
-                    placeholder="e.g. 123456"
-                    maxLength={6}
+                    placeholder="e.g. 12345678"
+                    maxLength={8}
                     required
                     className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500 font-mono tracking-widest text-center text-lg font-bold"
                   />
@@ -788,7 +789,7 @@ function LoginContent() {
                 <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Reset Security Token</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><Lock size={18} /></div>
-                  <input type="text" value={otpToken} onChange={(e) => setOtpToken(e.target.value)} placeholder="6-digit recovery code" maxLength={6} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                  <input type="text" value={otpToken} onChange={(e) => setOtpToken(e.target.value)} placeholder="8-digit recovery code" maxLength={8} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
                 </div>
               </div>
 
