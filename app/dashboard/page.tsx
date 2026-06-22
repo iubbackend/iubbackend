@@ -113,8 +113,9 @@ export default function DashboardPage() {
   // USER COURSES STATES
   const [editableCourses, setEditableCourses] = useState<any[]>([]);
 
-  const [hasChanges, setHasChanges] = useState(false);
-  const [pendingUpdates, setPendingUpdates] = useState<{ [subjectId: string]: { name: string; credits: number } }>({});
+    // Tracks which specific course ID is currently being edited and its live values
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [courseForm, setCourseForm] = useState({ name: "", credits: 3 });
 
   // CHAT STATES
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -626,31 +627,66 @@ export default function DashboardPage() {
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !currentUser.reg) return;
-    try {
-      const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
-      if (!receiver) return;
+    
+    const textToSend = chatInput.trim();
+    const receiver = isAdmin ? activeAdminChatUser?.reg : ADMIN_REG;
+    if (!receiver) return;
 
+    // 1. Create an instant local "Optimistic" copy of the message for a snappy UI
+    const temporaryId = 'temp-' + Date.now();
+    const localOptimisticMsg: ChatMessage = {
+      id: temporaryId,
+      sender_reg: currentUser.reg.toUpperCase(),
+      receiver_reg: receiver.toUpperCase(),
+      content: textToSend,
+      created_at: new Date().toISOString(),
+      is_read: false,
+      is_delivered: false // Displays single check mark locally while saving
+    };
+
+    // Force append directly into the UI array state container immediately
+    setChatMessages(prev => {
+      if (prev.find(m => m.content === textToSend && m.id.startsWith('temp-'))) return prev;
+      return [...prev, localOptimisticMsg];
+    });
+    setChatInput("");
+
+    try {
       if (editingMsgId) {
-        await supabase.from('messages').update({ content: chatInput.trim() }).eq('id', editingMsgId);
+        await supabase.from('messages').update({ content: textToSend }).eq('id', editingMsgId);
         setEditingMsgId(null);
+        
+        // Local state mutation block for edited records
+        setChatMessages(prev => prev.map(m => m.id === editingMsgId ? { ...m, content: textToSend } : m));
       } else {
-        await supabase.from('messages').insert({
+        // 2. Commit safely to the Supabase backend database
+        const { data: serverMsg, error } = await supabase.from('messages').insert({
           sender_reg: currentUser.reg.toUpperCase(),
           receiver_reg: receiver.toUpperCase(),
-          content: chatInput.trim(),
+          content: textToSend,
           is_delivered: true,
           is_read: false
-        });
+        }).select().maybeSingle();
+
+        if (error) throw error;
+
+        // 3. Swap the placeholder message with the authenticated server message
+        if (serverMsg) {
+          setChatMessages(prev => 
+            prev.map(m => m.id === temporaryId ? (serverMsg as ChatMessage) : m)
+          );
+        }
       }
-      setChatInput("");
-      
-      if (!isAdmin) {
-        loadUserChat();
-      } else if (activeAdminChatUser) {
-        loadAdminSingleChat(activeAdminChatUser.reg, activeAdminChatUser.name);
+
+      // Re-trigger global sync states
+      if (isAdmin) {
+        loadAdminChatList();
       }
     } catch(e) {
-      showToast("Error", "Message delivery failed.", "error");
+      // Rollback configuration if network drops
+      setChatMessages(prev => prev.filter(m => m.id !== temporaryId));
+      setChatInput(textToSend); // Put back text so user doesn't lose it
+      showToast("Error", "Message transmission failed. Please retry.", "error");
     }
   };
 
@@ -1237,19 +1273,16 @@ export default function DashboardPage() {
 
         {/* TAB: NORMAL USER EDIT COURSES */}
         {!isAdmin && activeTab === "edit_courses" && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-24">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-2xl font-black mb-1 flex items-center gap-2"><BookOpen className={t.primary} /> Course Details</h2>
-                <p className="opacity-70 text-xs">Modify course titles or credit hours (2, 3, or 4). Course codes are fixed.</p>
-              </div>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-black mb-1 flex items-center gap-2"><BookOpen className={t.primary} /> Course Details</h2>
+              <p className="opacity-70 text-xs">Modify course titles or credit hours. Click Save on the course row to update the live database.</p>
             </div>
         
             {editableCourses.length === 0 ? (
               <div className="text-center p-8 opacity-50 border rounded-2xl">No academic courses found.</div>
             ) : (
               <div className="space-y-8">
-                {/* Grouping records semester-wise manually */}
                 {Array.from(new Set(editableCourses.map(c => c.sem || "General Data"))).map((semesterName) => (
                   <div key={semesterName} className="space-y-3">
                     {/* Semester Header Card */}
@@ -1260,9 +1293,7 @@ export default function DashboardPage() {
                     {/* Courses inside this specific semester */}
                     <div className="grid grid-cols-1 gap-3">
                       {editableCourses.filter(c => (c.sem || "General Data") === semesterName).map((course) => {
-                        const currentPending = pendingUpdates[course.id];
-                        const displayName = currentPending ? currentPending.name : course.course_name;
-                        const displayCredits = currentPending ? currentPending.credits : course.credit_hours;
+                        const isEditingThis = editingCourseId === course.id;
         
                         return (
                           <div key={course.id} className={`${t.cardBg} border ${t.border} p-4 rounded-xl flex flex-col sm:flex-row gap-4 justify-between sm:items-center shadow-sm transition-all`}>
@@ -1270,40 +1301,92 @@ export default function DashboardPage() {
                               <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-semibold mb-1.5 inline-block ${theme === 'light' ? 'bg-slate-50 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>
                                 {course.course_code}
                               </span>
-                              <input 
-                                type="text" 
-                                value={displayName}
-                                onChange={(e) => {
-                                  const formatted = e.target.value.replace(/\b\w/g, char => char.toUpperCase());
-                                  setPendingUpdates(prev => ({
-                                    ...prev,
-                                    [course.id]: { name: formatted, credits: Number(displayCredits) }
-                                  }));
-                                  setHasChanges(true);
-                                }}
-                                className="w-full font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-500/30 focus:border-amber-500 py-0.5 focus:outline-none transition-colors" 
-                                placeholder="Course Title"
-                              />
+                              
+                              {isEditingThis ? (
+                                <input 
+                                  type="text" 
+                                  value={courseForm.name}
+                                  onChange={(e) => {
+                                    const formatted = e.target.value.replace(/\b\w/g, char => char.toUpperCase());
+                                    setCourseForm(prev => ({ ...prev, name: formatted }));
+                                  }}
+                                  className="w-full font-bold text-sm bg-transparent border-b border-amber-500 py-0.5 focus:outline-none bg-slate-500/5 px-1.5 rounded" 
+                                  placeholder="Course Title"
+                                  autoFocus
+                                />
+                              ) : (
+                                <div className="font-bold text-sm py-0.5 opacity-90">{course.course_name}</div>
+                              )}
                             </div>
                             
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-4 justify-between sm:justify-end">
                               <div className="flex flex-col">
                                 <span className="text-[9px] font-bold uppercase opacity-50 mb-0.5">Cr. Hours</span>
-                                <select 
-                                  value={displayCredits} 
-                                  onChange={(e) => {
-                                    setPendingUpdates(prev => ({
-                                      ...prev,
-                                      [course.id]: { name: displayName, credits: Number(e.target.value) }
-                                    }));
-                                    setHasChanges(true);
-                                  }}
-                                  className={`bg-transparent text-xs border ${t.border} rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500`}
-                                >
-                                  <option className="text-black" value="2">2</option>
-                                  <option className="text-black" value="3">3</option>
-                                  <option className="text-black" value="4">4</option>
-                                </select>
+                                {isEditingThis ? (
+                                  <select 
+                                    value={courseForm.credits} 
+                                    onChange={(e) => setCourseForm(prev => ({ ...prev, credits: Number(e.target.value) }))}
+                                    className={`bg-transparent text-xs border ${t.border} rounded-lg px-2.5 py-1 focus:outline-none focus:border-amber-500`}
+                                  >
+                                    <option className="text-black" value="2">2</option>
+                                    <option className="text-black" value="3">3</option>
+                                    <option className="text-black" value="4">4</option>
+                                  </select>
+                                ) : (
+                                  <span className="text-xs font-mono font-bold px-2">{course.credit_hours}</span>
+                                )}
+                              </div>
+        
+                              {/* Inline Control Buttons right under the input interaction wrapper */}
+                              <div className="flex items-center gap-1.5 pt-3 sm:pt-0">
+                                {isEditingThis ? (
+                                  <>
+                                    <button 
+                                      onClick={() => { setEditingCourseId(null); }}
+                                      className="px-2.5 py-1.5 text-xs font-bold rounded-lg opacity-60 hover:opacity-100 transition-opacity"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button 
+                                      onClick={async () => {
+                                        if (![2, 3, 4].includes(courseForm.credits)) {
+                                          return showToast('Error', 'Credit hours must be 2, 3, or 4', 'error');
+                                        }
+                                        try {
+                                          const { error } = await supabase
+                                            .from('subjects')
+                                            .update({ 
+                                              course_name: courseForm.name.trim(), 
+                                              credit_hours: courseForm.credits 
+                                            })
+                                            .eq('id', course.id); // Secure targeted row match
+        
+                                          if (error) throw error;
+                                          
+                                          showToast('Success', 'Course details synced to cloud.', 'info');
+                                          setEditingCourseId(null);
+                                          loadEditableCourses(); // Refresh live state container
+                                        } catch(e) {
+                                          showToast('Error', 'Database synchronization failed.', 'error');
+                                        }
+                                      }}
+                                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition-colors"
+                                    >
+                                      Save
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button 
+                                    onClick={() => {
+                                      setEditingCourseId(course.id);
+                                      setCourseForm({ name: course.course_name, credits: course.credit_hours });
+                                    }}
+                                    className="p-1.5 rounded-lg opacity-60 hover:opacity-100 hover:bg-slate-500/10 transition-all"
+                                    title="Edit Row"
+                                  >
+                                    <Edit2 size={14} className={t.primary} />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1314,50 +1397,6 @@ export default function DashboardPage() {
                 ))}
               </div>
             )}
-        
-            {/* PERSISTENT FLOATING SAVE ACTION BAR */}
-            <AnimatePresence>
-              {hasChanges && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 50 }} 
-                  animate={{ opacity: 1, y: 0 }} 
-                  exit={{ opacity: 0, y: 50 }}
-                  className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xl px-5 py-4 bg-slate-900 border border-slate-700/60 shadow-2xl rounded-2xl flex items-center justify-between text-white backdrop-blur-md"
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertCircle size={18} className="text-amber-400" />
-                    <span className="text-xs font-semibold">You have unsaved changes</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => { setPendingUpdates({}); setHasChanges(false); }} 
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-white/10 transition-colors"
-                    >
-                      Discard
-                    </button>
-                    <button 
-                      onClick={async () => {
-                        try {
-                          const updates = Object.entries(pendingUpdates).map(([id, data]) => 
-                            supabase.from('subjects').update({ course_name: data.name, credit_hours: data.credits }).eq('id', id)
-                          );
-                          await Promise.all(updates);
-                          showToast('Success', 'All changes committed to database.', 'info');
-                          setPendingUpdates({});
-                          setHasChanges(false);
-                          loadEditableCourses();
-                        } catch(e) {
-                          showToast('Error', 'Failed to save changes.', 'error');
-                        }
-                      }} 
-                      className="bg-amber-500 text-slate-950 px-4 py-1.5 rounded-lg text-xs font-black shadow-lg shadow-amber-500/20 hover:bg-amber-400 transition-colors"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </motion.div>
         )}
 
