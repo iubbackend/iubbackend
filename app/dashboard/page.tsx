@@ -227,24 +227,17 @@ export default function DashboardPage() {
         }
         
         let actualName = "Student";
-        if (actualReg !== "UNKNOWN") {
-          let { data: studentNameRes } = await supabase
-            .from("students")
-            .select("name")
-            .eq("reg", actualReg) 
-            .maybeSingle();
-        
-          if (!studentNameRes?.name) {
-            const { data: lowerCaseRes } = await supabase
+          if (actualReg !== "UNKNOWN") {
+            const { data: studentNameRes } = await supabase
               .from("students")
               .select("name")
-              .ilike("reg", actualReg.trim())
+              .ilike("reg", actualReg.trim()) // Direct, case-insensitive, trims trailing/leading spaces
               .maybeSingle();
-            studentNameRes = lowerCaseRes;
+          
+            if (studentNameRes?.name) {
+              actualName = studentNameRes.name;
+            }
           }
-        
-          if (studentNameRes?.name) actualName = studentNameRes.name;
-        }
         
         const newUserState = { 
           reg: actualReg.toUpperCase(), 
