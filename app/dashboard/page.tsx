@@ -533,13 +533,24 @@ export default function DashboardPage() {
     }
   };
 
-  const handleAdminReject = async (paymentId: string) => {
+const handleAdminReject = async (paymentId: string) => {
     if (window.confirm("Are you sure you want to reject this request?")) {
         try {
-            await supabase.from('payments_record').update({ status: 'rejected' }).eq('id', paymentId);
+            const { error } = await supabase
+              .from('payments_record')
+              .update({ status: 'rejected' })
+              .eq('id', paymentId);
+
+            if (error) throw error;
+
             showToast("Rejected", "Request rejected successfully.", "info");
+            
+            // Explicitly force clear the row from the local view immediately
+            setPendingApprovals(prev => prev.filter(p => p.id !== paymentId));
             loadRealAdminData();
-        } catch(e) { showToast("Error", "Failed to reject.", "error"); }
+        } catch(e) { 
+          showToast("Error", "Failed to reject.", "error"); 
+        }
     }
   };
 
@@ -547,10 +558,21 @@ export default function DashboardPage() {
     const newAmount = window.prompt("Modify Amount for this request:", currentAmount.toString());
     if (newAmount && !isNaN(Number(newAmount))) {
         try {
-            await supabase.from('payments_record').update({ amount: Number(newAmount) }).eq('id', paymentId);
+            const { error } = await supabase
+              .from('payments_record')
+              .update({ amount: Number(newAmount) })
+              .eq('id', paymentId);
+
+            if (error) throw error;
+
             showToast("Modified", `Amount updated to Rs ${newAmount}`, "info");
+            
+            // Optimistically update the single modified row locally
+            setPendingApprovals(prev => prev.map(p => p.id === paymentId ? { ...p, amount: Number(newAmount) } : p));
             loadRealAdminData();
-        } catch(e) { showToast("Error", "Failed to modify.", "error"); }
+        } catch(e) { 
+          showToast("Error", "Failed to modify.", "error"); 
+        }
     }
   };
 
