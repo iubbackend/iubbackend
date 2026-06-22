@@ -226,31 +226,41 @@ function LoginContent() {
         
         // 3. SECURE REFERRAL ENGINE INTERACTION LINK
         try {
-          // Fallback array chain ensures referred string is never dropped in Incognito views
           const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
-          
+          const cleanRoll = rollNumber.trim().toUpperCase();
+        
+          // 🚨 DIAGNOSTIC POPUP 1: SEE WHAT THE FRONTEND IS CAPTURING
+          alert(`Frontend Check -> Referrer Found: "${activeReferrer}" | Your New Test Reg: "${cleanRoll}"`);
+        
           if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
             const cleanReferrer = activeReferrer.toUpperCase().trim();
             
-            // Push direct record to referrals table - This wakes up the DB trigger instantly!
-            const { error: refError } = await supabase
+            const { data: refData, error: refError } = await supabase
               .from('referrals')
               .insert({
                 referrer_reg: cleanReferrer,
                 referred_reg: cleanRoll
-              });
-
+              })
+              .select();
+        
             if (refError) {
-              console.error("Referral registration logging rejected:", refError);
+              // 🚨 DIAGNOSTIC POPUP 2: IF SUPABASE REJECTS THE INSERT
+              alert(`Supabase Rejected Insert! Error Code: ${refError.code} | Message: ${refError.message}`);
+              console.error("Database rejected referral coupling insert:", refError);
             } else {
-              console.log(`Successfully mapped referral tracking: ${cleanReferrer} -> ${cleanRoll}`);
+              // 🚨 DIAGNOSTIC POPUP 3: IF IT WENT THROUGH SUCCESSFULLY
+              alert(`Success! Saved to database: ${JSON.stringify(refData)}`);
               if (typeof window !== "undefined") {
                 localStorage.removeItem("referred_by");
               }
             }
+          } else {
+            // 🚨 DIAGNOSTIC POPUP 4: IF IT SKIPPED THE CODE PATH Entirely
+            alert(`Skipped Insert! Why? Either activeReferrer is missing or it equals your current roll number.`);
           }
-        } catch (creditErr) {
-          console.error("Failed to safely process automatic structural ledger updates:", creditErr);
+        } catch (creditErr: any) {
+          alert(`Frontend crashed completely before database call: ${creditErr.message}`);
+          console.error("Failed to safely process backend automatic tracking chain:", creditErr);
         }
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
