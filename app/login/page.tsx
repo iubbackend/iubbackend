@@ -202,6 +202,7 @@ function LoginContent() {
     const hashedPassword = await hashPassword(password);
 
     try {
+      // 1. Sign up the user inside Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
@@ -213,6 +214,7 @@ function LoginContent() {
         return;
       }
 
+      // 2. Insert the main user account profile record
       const { error } = await supabase
         .from('users')
         .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
@@ -221,23 +223,34 @@ function LoginContent() {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
         else setErrorMsg('Error creating account. Please try again.');
       } else {
+        
+        // 3. SECURE REFERRAL ENGINE COUPLING
         try {
-          const savedReferral = typeof window !== "undefined" ? localStorage.getItem("referred_by") : null;
+          // Volatile memory safety: Fall back to state variable if Incognito flushes storage
+          const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
           
-          if (savedReferral && savedReferral.toUpperCase() !== cleanRoll) {
-            await supabase
+          if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
+            const cleanReferrer = activeReferrer.toUpperCase().trim();
+            
+            // Execute the backend insert pipeline securely
+            const { error: refError } = await supabase
               .from('referrals')
               .insert({
-                referrer_reg: savedReferral.toUpperCase(),
+                referrer_reg: cleanReferrer,
                 referred_reg: cleanRoll
               });
 
-            if (typeof window !== "undefined") {
-              localStorage.removeItem("referred_by");
+            if (refError) {
+              console.error("Database rejected referral coupling insert:", refError);
+            } else {
+              console.log(`Referral saved! ${cleanReferrer} invited ${cleanRoll}`);
+              if (typeof window !== "undefined") {
+                localStorage.removeItem("referred_by");
+              }
             }
           }
         } catch (creditErr) {
-          console.error("Failed to safely initialize user referral structure trace:", creditErr);
+          console.error("Failed to safely process backend automatic tracking chain:", creditErr);
         }
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
