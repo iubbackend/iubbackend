@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2 } from 'lucide-react';
+import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2, MessageSquare } from 'lucide-react';
 
 // --- NATIVE BROWSER HASHING HELPER ---
 async function hashPassword(password: string) {
@@ -59,10 +59,13 @@ function LoginContent() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('referred_by', cleanRef);
       }
-      setView('signup');
+      setView('signup'); // FORCE SIGNUP OPEN FOR REFERRED USERS
     } else if (typeof window !== 'undefined') {
       const savedRef = localStorage.getItem('referred_by');
-      if (savedRef) setReferralCode(savedRef.toUpperCase());
+      if (savedRef) {
+        setReferralCode(savedRef.toUpperCase());
+        setView('signup'); // AUTO OPEN UPON PERSISTED LINK SESSIONS TOO
+      }
     }
 
     const isDark = document.documentElement.classList.contains('dark');
@@ -130,7 +133,6 @@ function LoginContent() {
     const cleanRollNumber = rollNumber.trim().toUpperCase();
   
     try {
-      // 1. Find the email associated with this roll number first
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('email')
@@ -143,7 +145,6 @@ function LoginContent() {
         return;
       }
   
-      // 2. Authenticate directly using Supabase Auth with the retrieved email
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: userData.email.toLowerCase().trim(), 
         password: password, 
@@ -152,7 +153,6 @@ function LoginContent() {
       if (authError) {
         setErrorMsg('Invalid Roll Number or Password.');
       } else {
-        // 3. Complete session retrieval now that RLS allows access
         const { data: profile } = await supabase
           .from('users')
           .select('reg, phone, email')
@@ -166,7 +166,7 @@ function LoginContent() {
           email: userData.email 
         };
         
-        localStorage.setItem("iub_currentUser", JSON.stringify(userState));
+        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
         setSuccessMsg('Login successful! Welcome back.');
         
         setTimeout(() => {
@@ -215,7 +215,7 @@ function LoginContent() {
 
       const { error } = await supabase
         .from('users')
-        .insert([{ reg: cleanRoll, phone: phone.trim(), email: cleanEmail, pass: hashedPassword }]);
+        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
 
       if (error) {
         if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
@@ -224,20 +224,20 @@ function LoginContent() {
         try {
           const savedReferral = typeof window !== "undefined" ? localStorage.getItem("referred_by") : null;
           
-          await supabase
-            .from('user_credits')
-            .insert([{ 
-              user_reg: cleanRoll, 
-              credits: 0, 
-              free_searches_today: 0,
-              referred_by: savedReferral ? savedReferral.toUpperCase() : null
-            }]);
+          if (savedReferral && savedReferral.toUpperCase() !== cleanRoll) {
+            await supabase
+              .from('referrals')
+              .insert({
+                referrer_reg: savedReferral.toUpperCase(),
+                referred_reg: cleanRoll
+              });
 
-          if (typeof window !== "undefined") {
-            localStorage.removeItem("referred_by");
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("referred_by");
+            }
           }
         } catch (creditErr) {
-          console.error("Failed to initialize user wallet/referral:", creditErr);
+          console.error("Failed to safely initialize user referral structure trace:", creditErr);
         }
 
         setSuccessMsg('Account created! A verification OTP has been sent to your email.');
@@ -252,15 +252,14 @@ function LoginContent() {
     }
   };
 
-    const handleForgotEmail = async (e: React.FormEvent) => {
+  const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
     
-    const targetPhone = phone.trim();
-    // Ensure the phone format matches how it is stored in your database
-    // If you store it as '0300-1234567', keep the hyphens.
-    if (targetPhone.length < 11) {
-      setErrorMsg('Invalid phone number format.');
+    // STRIPS HYPHENS CLEAN TO PERFECTLY MATCH RAW NUMBER STRING SEARCH PATTERNS
+    const targetPhone = phone.replace(/-/g, '').trim();
+    if (targetPhone.length !== 11) {
+      setErrorMsg('Invalid phone number format. Please enter full 11 digits.');
       return;
     }
   
@@ -268,17 +267,16 @@ function LoginContent() {
     const supabase = getSupabase();
   
     try {
-      // Correctly query by the phone column
       const { data, error } = await supabase
         .from('users')
         .select('email')
-        .eq('phone', targetPhone.replace('-', '')) 
+        .eq('phone', targetPhone) 
         .maybeSingle();
         
       if (error || !data) {
-        setErrorMsg('No account found with this phone number.');
+        setErrorMsg('No account found matching this phone number layout sequence.');
       } else {
-        setSuccessMsg(`Your registered email is: ${maskEmailString(data.email)}`);
+        setSuccessMsg(`Your registered email is: ${data.email}`);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
@@ -325,209 +323,263 @@ function LoginContent() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 transition-colors duration-300 dark:bg-gray-900 p-4">
+    <div className="flex flex-col min-h-screen bg-gray-50 text-slate-800 dark:bg-[#00122a] dark:text-slate-100 font-sans transition-colors duration-300 overflow-x-hidden relative">
       
-      <button
-        onClick={toggleTheme}
-        type="button"
-        className="absolute top-6 right-6 p-2 rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-      >
-        {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
-      </button>
-
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl transition-colors duration-300 dark:bg-gray-800 dark:shadow-2xl">
-        
-        <div className="mb-8 text-center relative">
-          {view !== 'login' && (
-            <button 
-              onClick={() => switchView(view === 'forgot_email' ? 'forgot_password' : 'login')}
-              type="button"
-              className="absolute left-0 top-1 text-gray-500 hover:text-gray-900 dark:hover:text-white"
-            >
-              <ArrowLeft size={24} />
-            </button>
-          )}
-          <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">
-            {view === 'login' && 'Welcome Back'}
-            {view === 'signup' && 'Create Account'}
-            {view === 'forgot_password' && 'Reset Password'}
-            {view === 'forgot_email' && 'Find Email'}
-          </h2>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {view === 'login' && 'Sign in using your Roll Number'}
-            {view === 'signup' && 'Register your details below'}
-            {view === 'forgot_password' && 'Enter details to receive an OTP'}
-            {view === 'forgot_email' && 'Enter your phone to reveal your email'}
-          </p>
+      {/* 1. MATCHED INTEGRATED HEADER SYSTEM */}
+      <header className="sticky top-0 z-40 backdrop-blur-xl border-b border-gray-200 bg-white/90 dark:border-[#00348c]/50 dark:bg-[#00122a]/90 px-4 py-3.5 flex justify-between items-center">
+        <div className="flex items-center gap-2.5 max-w-5xl mx-auto w-full justify-between">
+          <div className="flex items-center gap-1.5 cursor-pointer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-blue-600 dark:text-amber-500">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="fill-current opacity-20"/>
+              <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 14l3-3 2 2 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <h1 className="text-base sm:text-lg font-black tracking-tight leading-none whitespace-nowrap dark:text-white">
+              IUB Result<span className="text-blue-600 dark:text-amber-500">Backend</span>
+            </h1>
+          </div>
+          
+          <button onClick={toggleTheme} className="p-1.5 rounded-lg border border-gray-300 bg-white text-amber-500 dark:border-[#00348c]/50 dark:bg-[#001c4d] dark:text-blue-300 shadow-sm">
+            {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
         </div>
+      </header>
 
-        {view === 'signup' && referralCode && (
-          <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
-            <Share2 size={18} className="animate-pulse" />
-            <div className="text-left">
-              <p className="text-xs font-black uppercase tracking-wider">Referral Code Applied</p>
-              <p className="text-xs opacity-90">Invited by: <span className="font-mono font-bold">{referralCode}</span> (Locked)</p>
-            </div>
-          </div>
-        )}
-
-        {errorMsg && (
-          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400 font-semibold">
-            {errorMsg}
-          </div>
-        )}
-        {successMsg && (
-          <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-600 dark:bg-green-900/30 dark:text-green-400 font-semibold">
-            {successMsg}
-          </div>
-        )}
-
-        {/* VIEW 1: LOGIN */}
-        {view === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Roll Number</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <User size={20} />
-                </div>
-                <input
-                  type="text"
-                  value={rollNumber}
-                  onChange={(e) => setRollNumber(e.target.value.toUpperCase())}
-                  placeholder="FA23-BSE-001"
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Password</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <Lock size={20} />
-                </div>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                />
-              </div>
-            </div>
-
-            <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-blue-700 disabled:opacity-70 transition-all">
-              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Log In'}
-            </button>
-
-            <div className="flex flex-col items-center space-y-3 pt-4 text-sm text-gray-600 dark:text-gray-400">
-              <button type="button" onClick={() => switchView('forgot_password')} className="hover:text-blue-600 hover:underline dark:hover:text-blue-400">
-                Forgot Password?
-              </button>
-              <p>
-                Don't have an account?{' '}
-                <button type="button" onClick={() => switchView('signup')} className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                  Sign Up
-                </button>
-              </p>
-            </div>
-          </form>
-        )}
-
-        {/* VIEW 2: SIGN UP */}
-        {view === 'signup' && (
-          <form onSubmit={handleSignup} className="space-y-4">
-            <div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <User size={20} />
-                </div>
-                <input type="text" value={rollNumber} onChange={(e) => setRollNumber(e.target.value.toUpperCase())} placeholder="Roll Number" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <Phone size={20} />
-                </div>
-                <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="0300-1234567" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <Mail size={20} />
-                </div>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (@gmail.com)" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <Lock size={20} />
-                </div>
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-green-700 disabled:opacity-70 transition-all">
-              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Sign Up'}
-            </button>
-          </form>
-        )}
-
-        {/* VIEW 3: FORGOT PASSWORD */}
-        {view === 'forgot_password' && (
-          <form onSubmit={handleForgotPassword} className="space-y-5">
-            <div>
-              <div className="relative mb-4">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><User size={20} /></div>
-                <input type="text" value={rollNumber} onChange={(e) => setRollNumber(e.target.value.toUpperCase())} placeholder="Roll Number" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><Mail size={20} /></div>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Registered Email" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-orange-600 disabled:opacity-70 transition-all">
-              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Send OTP via Supabase'}
-            </button>
-
-            <div className="text-center pt-2">
-              <button type="button" onClick={() => switchView('forgot_email')} className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400">
-                Forgot your Email? Click here
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* VIEW 4: FORGOT EMAIL */}
-        {view === 'forgot_email' && (
-          <form onSubmit={handleForgotEmail} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Enter Registered Phone</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                  <Phone size={20} />
-                </div>
-                <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="0300-1234567" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
-              </div>
-            </div>
-
-            <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-md hover:bg-purple-700 disabled:opacity-70 transition-all">
-              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Find My Email'}
-            </button>
-          </form>
-        )}
-
+      {/* 2. THIN MARQUEE SUB-HEADER INFOBAR */}
+      <div className="w-full py-1.5 text-[10px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-4 border-b border-gray-200 bg-gray-100 text-gray-600 dark:border-[#00348c]/50 dark:bg-[#000a1a]/80 dark:text-blue-400/60">
+        <span>Check Result Before time</span>
+        <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
+        <span>Marks</span>
+        <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
+        <span>Other's Result</span>
       </div>
+
+      {/* 3. CORE CONTENT CENTER BODY INTERACTION WRAPPER */}
+      <div className="flex-1 flex items-center justify-center p-4 md:py-12">
+        <div className="w-full max-w-md rounded-2xl bg-white border border-gray-200 p-8 shadow-xl transition-colors duration-300 dark:bg-[#001c4d]/80 dark:border-[#00348c]/50">
+          
+          <div className="mb-8 text-center relative">
+            {view !== 'login' && (
+              <button 
+                onClick={() => switchView(view === 'forgot_email' ? 'forgot_password' : 'login')}
+                type="button"
+                className="absolute left-0 top-1 text-gray-500 hover:text-gray-900 dark:text-blue-300/70 dark:hover:text-white"
+              >
+                <ArrowLeft size={24} />
+              </button>
+            )}
+            <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">
+              {view === 'login' && 'Welcome Back'}
+              {view === 'signup' && 'Create Account'}
+              {view === 'forgot_password' && 'Reset Password'}
+              {view === 'forgot_email' && 'Find Email'}
+            </h2>
+            <p className="mt-2 text-sm text-gray-600 dark:text-blue-300/70">
+              {view === 'login' && 'Sign in using your Roll Number'}
+              {view === 'signup' && 'Register your details below'}
+              {view === 'forgot_password' && 'Enter details to receive an OTP'}
+              {view === 'forgot_email' && 'Enter your phone to reveal your email'}
+            </p>
+          </div>
+
+          {view === 'signup' && referralCode && (
+            <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
+              <Share2 size={18} className="animate-pulse" />
+              <div className="text-left">
+                <p className="text-xs font-black uppercase tracking-wider">Referral Code Applied</p>
+                <p className="text-xs opacity-90">Invited by: <span className="font-mono font-bold text-blue-600 dark:text-amber-400">{referralCode}</span></p>
+              </div>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:border-red-500/30 dark:text-red-400 font-semibold">
+              {errorMsg}
+            </div>
+          )}
+          {successMsg && (
+            <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-600 dark:bg-emerald-900/20 dark:border-emerald-500/30 dark:text-emerald-400 font-semibold break-words">
+              {successMsg}
+            </div>
+          )}
+
+          {/* VIEW 1: LOGIN */}
+          {view === 'login' && (
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">Roll Number</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <User size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    value={rollNumber}
+                    onChange={(e) => setRollNumber(e.target.value.toUpperCase())}
+                    placeholder="e.g. F22BAID1M011"
+                    required
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Lock size={18} />
+                  </div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-gradient-to-r dark:from-amber-500 dark:to-amber-600 dark:hover:from-amber-400 dark:hover:to-amber-500 dark:text-[#00122a] px-4 py-3 text-sm font-black shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Log In'}
+              </button>
+
+              <div className="flex flex-col items-center space-y-4 pt-4 border-t border-gray-200 dark:border-[#00348c]/30 text-sm">
+                <button type="button" onClick={() => switchView('forgot_password')} className="text-xs font-semibold text-gray-500 dark:text-blue-300/50 hover:underline hover:text-blue-600 dark:hover:text-amber-400">
+                  Forgot Password?
+                </button>
+                
+                {/* UPGRADED ELEVATED BUTTON CALL-TO-ACTION FOR SIGNUP */}
+                <div className="w-full text-center space-y-2">
+                  <p className="text-xs text-gray-500 dark:text-blue-300/50 font-medium">New to the portal layout?</p>
+                  <button 
+                    type="button" 
+                    onClick={() => switchView('signup')} 
+                    className="w-full py-2.5 rounded-xl border-2 border-dashed border-blue-600/50 text-blue-600 dark:border-amber-500/40 dark:text-amber-400 hover:bg-blue-500/5 dark:hover:bg-amber-500/5 font-bold transition-all text-xs"
+                  >
+                    Create Fresh Account &rarr;
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+
+          {/* VIEW 2: SIGN UP */}
+          {view === 'signup' && (
+            <form onSubmit={handleSignup} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Roll Number</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <User size={18} />
+                  </div>
+                  <input type="text" value={rollNumber} onChange={(e) => setRollNumber(e.target.value.toUpperCase())} placeholder="e.g. S25BAID1M001" rIEUQired required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Phone size={18} />
+                  </div>
+                  <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Email Address</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Mail size={18} />
+                  </div>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. student@gmail.com" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Lock size={18} />
+                  </div>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 hover:bg-green-700 font-black px-4 py-3 text-sm text-white shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Complete Registration'}
+              </button>
+
+              <div className="pt-4 border-t border-gray-200 dark:border-[#00348c]/30 text-center">
+                <button type="button" onClick={() => switchView('login')} className="text-xs font-bold text-blue-600 dark:text-amber-400 hover:underline">
+                  Already registered? Return to Login
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* VIEW 3: FORGOT PASSWORD */}
+          {view === 'forgot_password' && (
+            <form onSubmit={handleForgotPassword} className="space-y-5">
+              <div>
+                <div className="relative mb-4">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><User size={18} /></div>
+                  <input type="text" value={rollNumber} onChange={(e) => setRollNumber(e.target.value.toUpperCase())} placeholder="Roll Number" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                </div>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><Mail size={18} /></div>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Registered Email" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-orange-500 hover:bg-orange-600 text-white py-3 text-sm font-bold shadow-md disabled:opacity-70 transition-all">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Send Reset Link'}
+              </button>
+
+              <div className="text-center pt-2">
+                <button type="button" onClick={() => switchView('forgot_email')} className="text-xs font-bold text-blue-600 hover:underline dark:text-amber-400">
+                  Forgot your Email? Recover using Phone
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* VIEW 4: FORGOT EMAIL */}
+          {view === 'forgot_email' && (
+            <form onSubmit={handleForgotEmail} className="space-y-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">Enter Registered Phone</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                    <Phone size={18} />
+                  </div>
+                  <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-purple-600 hover:bg-purple-700 text-white py-3 text-sm font-bold shadow-md disabled:opacity-70 transition-all">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Find My Email'}
+              </button>
+            </form>
+          )}
+
+        </div>
+      </div>
+
+      {/* 4. BEAUTIFUL NANO HELPLINE FOOTER */}
+      <footer className="w-full py-4 text-center text-xs font-semibold tracking-wide border-t border-gray-200 bg-white text-gray-500 dark:border-[#00348c]/30 dark:bg-[#000a1a]/60">
+        <a 
+          href="https://wa.me/923119277832" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="inline-flex items-center gap-2 text-gray-500 hover:text-emerald-500 dark:text-blue-400/70 dark:hover:text-emerald-400 transition-colors"
+        >
+          <MessageSquare size={14} className="text-emerald-500" />
+          <span>Need Help? Contact Admin via WhatsApp Support</span>
+        </a>
+      </footer>
+
     </div>
   );
 }
