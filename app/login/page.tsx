@@ -821,7 +821,7 @@ function LoginContent() {
       {/* 4. BEAUTIFUL NANO HELPLINE FOOTER */}
       <footer className="w-full py-4 text-center text-xs font-semibold tracking-wide border-t border-gray-200 bg-white text-gray-500 dark:border-[#00348c]/30 dark:bg-[#000a1a]/60">
         <a 
-          href="https://wa.me/923119277832" 
+          href="mailto:iubbackend@gmail.com" 
           target="_blank" 
           rel="noopener noreferrer" 
           className="inline-flex items-center gap-2 text-gray-500 hover:text-emerald-500 dark:text-blue-400/70 dark:hover:text-emerald-400 transition-colors"
