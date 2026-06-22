@@ -478,7 +478,7 @@ export default function DashboardPage() {
       if (page === 1) localStorage.setItem('iub_historyLogs', JSON.stringify(newLogs));
     } catch (err) {
       console.error("Failed to load history", err);
-    } final {
+    } finally { // <--- Fixed to "finally"
       setCreditsTabLoading(false);
     }
   };
