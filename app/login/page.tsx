@@ -177,10 +177,6 @@ function LoginContent() {
         localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
         setSuccessMsg('Login successful! Welcome back.');
         
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 500);
-      }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
     } finally {
