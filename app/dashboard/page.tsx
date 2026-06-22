@@ -2044,16 +2044,13 @@ export default function DashboardPage() {
                           <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(dep.created_at).toLocaleDateString()}</td>
                           <td className="px-4 py-3 font-semibold text-emerald-500 flex items-center gap-1.5">
                             <ArrowRight size={12} className="rotate-45"/> 
-                            {dep.package_id === 'referral_reward' ? 'Referral Reward' : 'Deposit'}
+                            Deposit
                           </td>
                           <td className="px-4 py-3 opacity-80">
-                            {dep.package_id === 'referral_reward' 
-                              ? `Earned 850 credits via registration invite bonus.` 
-                              : `Rs ${dep.amount} via ${dep.account_name}`}
+                            Rs {dep.amount} via {dep.account_name}
                           </td>
                           <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                            {/* Fixed display layout conditional values logic */}
-                            {dep.package_id === 'referral_reward' ? '+ 850 CR' : `Rs ${dep.amount}`}
+                            {dep.status.toUpperCase()}
                           </td>
                         </tr>
                       ))}
