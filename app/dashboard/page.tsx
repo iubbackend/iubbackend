@@ -113,6 +113,9 @@ export default function DashboardPage() {
   // USER COURSES STATES
   const [editableCourses, setEditableCourses] = useState<any[]>([]);
 
+  const [hasChanges, setHasChanges] = useState(false);
+  const [pendingUpdates, setPendingUpdates] = useState<{ [subjectId: string]: { name: string; credits: number } }>({});
+
   // CHAT STATES
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1239,44 +1242,127 @@ export default function DashboardPage() {
 
         {/* TAB: NORMAL USER EDIT COURSES */}
         {!isAdmin && activeTab === "edit_courses" && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-             <h2 className="text-2xl font-black mb-2 flex items-center gap-2"><BookOpen className={t.primary} /> Edit Courses Details</h2>
-             <p className="opacity-70 mb-5 text-sm">You can fix typo errors in course names (auto-capitalized) and adjust credit hours (limited to 2, 3, or 4). Course codes cannot be modified.</p>
-             
-             {editableCourses.length === 0 && <div className="text-center p-8 opacity-50 border rounded-2xl">No courses found.</div>}
-             
-             <div className="space-y-4">
-               {editableCourses.map((course, idx) => (
-                 <div key={idx} className={`${t.cardBg} border ${t.border} p-5 rounded-2xl flex flex-col md:flex-row gap-4 justify-between md:items-center shadow-sm`}>
-                    <div className="flex-1">
-                      <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono font-semibold mb-2 inline-block ${theme === 'light' ? 'bg-slate-100 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>{course.course_code}</span>
-                      <input 
-                         type="text" 
-                         defaultValue={course.course_name}
-                         onBlur={(e) => {
-                             if(e.target.value !== course.course_name) handleCourseUpdate(course.id, e.target.value, course.credit_hours);
-                         }}
-                         className={`w-full font-bold text-base bg-transparent border-b ${t.border} py-1 focus:outline-none focus:border-amber-500`} 
-                         placeholder="Course Name"
-                      />
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-24">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-black mb-1 flex items-center gap-2"><BookOpen className={t.primary} /> Course Details</h2>
+                <p className="opacity-70 text-xs">Modify course titles or credit hours (2, 3, or 4). Course codes are fixed.</p>
+              </div>
+            </div>
+        
+            {editableCourses.length === 0 ? (
+              <div className="text-center p-8 opacity-50 border rounded-2xl">No academic courses found.</div>
+            ) : (
+              <div className="space-y-8">
+                {/* Grouping records semester-wise manually */}
+                {Array.from(new Set(editableCourses.map(c => c.sem || "General Data"))).map((semesterName) => (
+                  <div key={semesterName} className="space-y-3">
+                    {/* Semester Header Card */}
+                    <div className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
+                      {getSemesterNumber(currentUser.reg, semesterName)}
                     </div>
-                    <div className="flex items-center gap-3">
-                       <div className="flex flex-col">
-                         <span className="text-[10px] font-bold uppercase opacity-50">Cr. Hours</span>
-                         <select 
-                           defaultValue={course.credit_hours} 
-                           onChange={(e) => handleCourseUpdate(course.id, course.course_name, e.target.value)}
-                           className={`bg-transparent border ${t.border} rounded-lg px-3 py-1.5 focus:outline-none focus:border-amber-500`}
-                         >
-                            <option className="text-black" value="2">2</option>
-                            <option className="text-black" value="3">3</option>
-                            <option className="text-black" value="4">4</option>
-                         </select>
-                       </div>
+        
+                    {/* Courses inside this specific semester */}
+                    <div className="grid grid-cols-1 gap-3">
+                      {editableCourses.filter(c => (c.sem || "General Data") === semesterName).map((course) => {
+                        const currentPending = pendingUpdates[course.id];
+                        const displayName = currentPending ? currentPending.name : course.course_name;
+                        const displayCredits = currentPending ? currentPending.credits : course.credit_hours;
+        
+                        return (
+                          <div key={course.id} className={`${t.cardBg} border ${t.border} p-4 rounded-xl flex flex-col sm:flex-row gap-4 justify-between sm:items-center shadow-sm transition-all`}>
+                            <div className="flex-1">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-semibold mb-1.5 inline-block ${theme === 'light' ? 'bg-slate-50 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>
+                                {course.course_code}
+                              </span>
+                              <input 
+                                type="text" 
+                                value={displayName}
+                                onChange={(e) => {
+                                  const formatted = e.target.value.replace(/\b\w/g, char => char.toUpperCase());
+                                  setPendingUpdates(prev => ({
+                                    ...prev,
+                                    [course.id]: { name: formatted, credits: Number(displayCredits) }
+                                  }));
+                                  setHasChanges(true);
+                                }}
+                                className="w-full font-bold text-sm bg-transparent border-b border-transparent hover:border-slate-500/30 focus:border-amber-500 py-0.5 focus:outline-none transition-colors" 
+                                placeholder="Course Title"
+                              />
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <div className="flex flex-col">
+                                <span className="text-[9px] font-bold uppercase opacity-50 mb-0.5">Cr. Hours</span>
+                                <select 
+                                  value={displayCredits} 
+                                  onChange={(e) => {
+                                    setPendingUpdates(prev => ({
+                                      ...prev,
+                                      [course.id]: { name: displayName, credits: Number(e.target.value) }
+                                    }));
+                                    setHasChanges(true);
+                                  }}
+                                  className={`bg-transparent text-xs border ${t.border} rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500`}
+                                >
+                                  <option className="text-black" value="2">2</option>
+                                  <option className="text-black" value="3">3</option>
+                                  <option className="text-black" value="4">4</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                 </div>
-               ))}
-             </div>
+                  </div>
+                ))}
+              </div>
+            )}
+        
+            {/* PERSISTENT FLOATING SAVE ACTION BAR */}
+            <AnimatePresence>
+              {hasChanges && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 50 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: 50 }}
+                  className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xl px-5 py-4 bg-slate-900 border border-slate-700/60 shadow-2xl rounded-2xl flex items-center justify-between text-white backdrop-blur-md"
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={18} className="text-amber-400" />
+                    <span className="text-xs font-semibold">You have unsaved changes</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => { setPendingUpdates({}); setHasChanges(false); }} 
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-white/10 transition-colors"
+                    >
+                      Discard
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const updates = Object.entries(pendingUpdates).map(([id, data]) => 
+                            supabase.from('subjects').update({ course_name: data.name, credit_hours: data.credits }).eq('id', id)
+                          );
+                          await Promise.all(updates);
+                          showToast('Success', 'All changes committed to database.', 'info');
+                          setPendingUpdates({});
+                          setHasChanges(false);
+                          loadEditableCourses();
+                        } catch(e) {
+                          showToast('Error', 'Failed to save changes.', 'error');
+                        }
+                      }} 
+                      className="bg-amber-500 text-slate-950 px-4 py-1.5 rounded-lg text-xs font-black shadow-lg shadow-amber-500/20 hover:bg-amber-400 transition-colors"
+                    >
+                      Save Changes
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
 
