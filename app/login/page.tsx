@@ -450,11 +450,11 @@ function LoginContent() {
     const cleanRoll = rollNumber.trim().toUpperCase();
 
     try {
-      // 1. ⚡ FIX: Validate code input context using 'email' type configuration
+      // 1. Validate code input context using 'email' type configuration
       const { error: otpError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
-        type: 'email', // Changed from 'recovery' to match token validation handshake rules
+        type: 'email', 
       });
 
       if (otpError) {
@@ -489,12 +489,6 @@ function LoginContent() {
       setIsLoading(false);
     }
   };
-
-      if (otpError) {
-        setErrorMsg(otpError.message || 'The recovery code provided is invalid or has expired.');
-        setIsLoading(false);
-        return;
-      }
 
       // 2. Perform raw payload encryption switch override
       const hashedPass = await hashPassword(newPassword);
