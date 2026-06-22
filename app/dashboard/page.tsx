@@ -262,7 +262,7 @@ export default function DashboardPage() {
             localStorage.setItem("iub_freeAttempts", attempts.toString());
           }
           
-          if (actualReg !== ADMIN_REG) {
+          if (actualReg.toUpperCase() !== ADMIN_REG) {
              const channel = supabase.channel('credits_update')
                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_credits', filter: `user_reg=eq.${actualReg}` }, (payload) => {
                   setCredits(payload.new.credits);
@@ -277,6 +277,30 @@ export default function DashboardPage() {
           supabase.from("academic_sessions").select("id, session_code"),
           supabase.from("sections").select("id, section_name, session_id, department_id")
         ]);
+
+        const newFilters = {
+          departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
+          sessions: (sessionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.session_code })),
+          sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
+        };
+        setFilterOptions(newFilters);
+        localStorage.setItem('iub_filterOptions', JSON.stringify(newFilters));
+
+        // ⚡ THE ADMIN MISMATCH FIX IS HERE
+        if (actualReg.toUpperCase() === ADMIN_REG) {
+          loadRealAdminData();
+          loadAdminChatList();
+        } else {
+          checkUnreadMessages(actualReg.toUpperCase());
+        }
+
+      } catch (error) {
+        console.error("Critical error loading data:", error);
+      }
+    }
+    
+    fetchInitialData();
+  }, [router]);
 
         const newFilters = {
           departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
@@ -362,7 +386,12 @@ export default function DashboardPage() {
     if (activeTab === "admin_chats" && isAdmin) loadAdminChatList();
     if (activeTab === "users_management" && isAdmin) loadManageUsers(0);
     if (activeTab === "edit_courses" && !isAdmin) loadEditableCourses();
-  }, [activeTab]);
+    
+    // ⚡ FIX: Force Admin data to refresh when navigating between admin tabs
+    if ((activeTab === "approvals" || activeTab === "leaderboard" || activeTab === "home") && isAdmin) {
+      loadRealAdminData();
+    }
+  }, [activeTab, isAdmin]); // Added isAdmin to the dependency array
 
   useEffect(() => {
     if (chatScrollRef.current) {
