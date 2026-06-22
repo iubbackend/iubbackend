@@ -851,6 +851,25 @@ const handleAdminReject = async (paymentId: string) => {
 
     if (!activeQuery.trim()) return;
 
+    // --- SERVER-SIDE RATE LIMIT GUARD ---
+    if (!isAdmin) {
+      try {
+        const { data: isAllowed, error: rateError } = await supabase.rpc('check_rate_limit', {
+          p_user_reg: currentUser.reg,
+          p_max_actions: 5,        // Max searches allowed
+          p_window_seconds: 60     // Within a rolling 60-second window
+        });
+
+        if (rateError || !isAllowed) {
+          showToast("Slow Down", "Rate limit exceeded. Please wait a moment before trying again.", "error");
+          setIsSearching(false);
+          return;
+        }
+      } catch (limitErr) {
+        console.error("Rate limit parsing error:", limitErr);
+      }
+    }
+
     if (newPage === 0 && isAdmin) {
       logSearch(activeQuery, "Admin Search");
     }
