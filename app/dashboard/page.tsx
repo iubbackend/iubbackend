@@ -17,11 +17,12 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
-// Synchronized with structural backend ledger arrays
-const ADMIN_REGS = ["", "S20BSCS1M01001"];
+const ADMIN_REGS = ["S25BARIN1M01118", "S20BSCS1M01001"];
 const SEARCH_COST = 850; 
 
 type SearchMode = "Roll Number" | "Name";
+type Theme = "light" | "dark"; // <--- MAKE SURE THIS EXACT LINE IS HERE!
+type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management" | "edit_courses";
 
 interface FilterItem {
   id: number;
