@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2, MessageSquare } from 'lucide-react';
+import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2, MessageSquare, RefreshCw } from 'lucide-react';
 
 // --- NATIVE BROWSER HASHING HELPER ---
 async function hashPassword(password: string) {
@@ -13,7 +13,7 @@ async function hashPassword(password: string) {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email' | 'verify_otp';
+type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email' | 'verify_otp' | 'reset_password';
 
 function LoginContent() {
   const router = useRouter();
@@ -29,18 +29,28 @@ function LoginContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otpToken, setOtpToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   
-  // UI States
+  // UI & Timeout States
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
 
   const getSupabase = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
     return createBrowserClient(supabaseUrl, supabaseKey);
   };
+
+  // Resend timer countdown logic
+  useEffect(() => {
+    if (resendCountdown > 0) {
+      const timer = setTimeout(() => setResendCountdown(resendCountdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCountdown]);
 
   // --- AUTOMATED REFERRAL EXTRACTOR & TRACKER ---
   useEffect(() => {
@@ -60,12 +70,12 @@ function LoginContent() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('referred_by', cleanRef);
       }
-      setView('signup'); // FORCE SIGNUP OPEN FOR REFERRED USERS
+      setView('signup');
     } else if (typeof window !== 'undefined') {
       const savedRef = localStorage.getItem('referred_by');
       if (savedRef) {
         setReferralCode(savedRef.toUpperCase());
-        setView('signup'); // AUTO OPEN UPON PERSISTED LINK SESSIONS TOO
+        setView('signup');
       }
     }
 
@@ -116,22 +126,11 @@ function LoginContent() {
     setPhone(value);
   };
 
-  const maskEmailString = (rawEmail: string) => {
-    if (!rawEmail) return "";
-    const parts = rawEmail.split("@");
-    if (parts.length !== 2) return rawEmail;
-    const [name, domain] = parts;
-    if (name.length <= 4) return `${name.slice(0, 1)}***@${domain}`;
-    return `${name.slice(0, 2)}***${name.slice(-2)}@${domain}`;
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
   
     const cleanRollNumber = rollNumber.trim().toUpperCase();
-  
-    // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
     const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
     if (!regRegex.test(cleanRollNumber)) {
       setErrorMsg('Invalid Registration Number format. Example: S25BARIN1M01118');
@@ -196,14 +195,12 @@ function LoginContent() {
     const cleanEmail = email.toLowerCase().trim();
     const cleanRoll = rollNumber.trim().toUpperCase();
   
-    // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
     const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
     if (!regRegex.test(cleanRoll)) {
       setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
       return;
     }
   
-    // 2. STRICT GMAIL VALIDATION
     const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
     if (!gmailRegex.test(cleanEmail)) {
       setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
@@ -218,11 +215,23 @@ function LoginContent() {
   
     setIsLoading(true);
     const supabase = getSupabase();
-    const hashedPassword = await hashPassword(password);
   
     try {
-      // Sign up user inside Supabase Auth engine
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      // 1. Check if profile configuration mapping conflicts before prompting engine
+      const { data: duplicateCheck } = await supabase
+        .from('users')
+        .select('reg, email')
+        .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`)
+        .maybeSingle();
+
+      if (duplicateCheck) {
+        setErrorMsg('Roll Number or Email domain profile already exists.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Auth signup configuration request without database injection
+      const { error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
       });
@@ -233,48 +242,12 @@ function LoginContent() {
         return;
       }
   
-      // Insert the main user account profile record into public schema
-      const { error } = await supabase
-        .from('users')
-        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
-  
-      if (error) {
-        if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
-        else setErrorMsg('Error creating account. Please try again.');
-      } else {
-        
-        // SECURE REFERRAL ENGINE INTERACTION LINK
-        try {
-          const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
-        
-          if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
-            const cleanReferrer = activeReferrer.toUpperCase().trim();
-            
-            const { error: refError } = await supabase
-              .from('referrals')
-              .insert({
-                referrer_reg: cleanReferrer,
-                referred_reg: cleanRoll
-              });
-        
-            if (refError) {
-              console.error("Database rejected referral coupling insert:", refError);
-            } else {
-              if (typeof window !== "undefined") {
-                localStorage.removeItem("referred_by");
-              }
-            }
-          }
-        } catch (creditErr) {
-          console.error("Failed to safely process automatic structural ledger updates:", creditErr);
-        }
-  
-        setSuccessMsg('Account created! A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!');
-        setTimeout(() => {
-          clearMessages();
-          setView('verify_otp');
-        }, 3500);
-      }
+      setSuccessMsg('A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!');
+      setResendCountdown(60);
+      setTimeout(() => {
+        clearMessages();
+        setView('verify_otp');
+      }, 3500);
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
     } finally {
@@ -289,40 +262,92 @@ function LoginContent() {
 
     const supabase = getSupabase();
     const cleanEmail = email.toLowerCase().trim();
-    const cleanRollNumber = rollNumber.trim().toUpperCase();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+    const rawNumber = phone.replace(/-/g, '');
 
     try {
-      const { error } = await supabase.auth.verifyOtp({
+      // 1. Validate Token configuration session status
+      const { error: verifyError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
         type: 'signup',
       });
 
-      if (error) {
-        setErrorMsg(error.message || 'Invalid or expired verification code.');
-      } else {
-        const { data: profile } = await supabase
-          .from('users')
-          .select('reg, phone, email')
-          .ilike('reg', cleanRollNumber)
-          .maybeSingle();
+      if (verifyError) {
+        setErrorMsg(verifyError.message || 'Invalid or expired verification code.');
+        setIsLoading(false);
+        return;
+      }
 
-        const userState = { 
-          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
-          name: "Student", 
-          phone: profile?.phone || "", 
-          email: cleanEmail 
-        };
-        
-        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
-        setSuccessMsg('Email verified successfully! Welcome to the portal.');
-        
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 1500);
+      // 2. Safe profile injection post-verification success checkpoint
+      const hashedPassword = await hashPassword(password);
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
+
+      if (insertError) {
+        if (insertError.code === '23505') {
+          setErrorMsg('Roll Number or Email already exists in the ledger schema.');
+        } else {
+          setErrorMsg('Auth succeeded, but database profile creation failed. Contact support.');
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. SECURE REFERRAL ENGINE INTERACTION LINK
+      try {
+        const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
+        if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
+          const cleanReferrer = activeReferrer.toUpperCase().trim();
+          await supabase.from('referrals').insert({
+            referrer_reg: cleanReferrer,
+            referred_reg: cleanRoll
+          });
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("referred_by");
+          }
+        }
+      } catch (creditErr) {
+        console.error("Non-blocking tracking ledger calculation conflict:", creditErr);
+      }
+
+      const userState = { reg: cleanRoll, name: "Student", phone: rawNumber, email: cleanEmail };
+      localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+      setSuccessMsg('Email verified successfully! Welcome to the portal.');
+      
+      setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 1500);
+    } catch (err) {
+      setErrorMsg('An unexpected execution error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCountdown > 0) return;
+    clearMessages();
+    setIsLoading(true);
+    
+    const supabase = getSupabase();
+    const cleanEmail = email.toLowerCase().trim();
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: cleanEmail,
+      });
+
+      if (error) {
+        setErrorMsg(error.message || 'Failed to dispatch replacement code.');
+      } else {
+        setSuccessMsg('A fresh validation OTP has been dispatched to your email.');
+        setResendCountdown(60);
       }
     } catch (err) {
-      setErrorMsg('An unexpected error occurred during verification.');
+      setErrorMsg('Could not process resend trigger.');
     } finally {
       setIsLoading(false);
     }
@@ -332,7 +357,6 @@ function LoginContent() {
     e.preventDefault();
     clearMessages();
     
-    // STRIPS HYPHENS CLEAN TO PERFECTLY MATCH RAW NUMBER STRING SEARCH PATTERNS
     const targetPhone = phone.replace(/-/g, '').trim();
     if (targetPhone.length !== 11) {
       setErrorMsg('Invalid phone number format. Please enter full 11 digits.');
@@ -389,10 +413,69 @@ function LoginContent() {
       if (error) {
         setErrorMsg('Failed to send OTP. Ensure Supabase Auth is configured.');
       } else {
-        setSuccessMsg('An OTP has been sent to your email address.');
+        setSuccessMsg('A reset token hash configuration was fired. Check Inbox/Spam.');
+        setTimeout(() => {
+          clearMessages();
+          setView('reset_password');
+        }, 2000);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCompletePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+    
+    if (newPassword.length < 6) {
+      setErrorMsg('Password configuration must equal or exceed 6 characters.');
+      return;
+    }
+
+    setIsLoading(true);
+    const supabase = getSupabase();
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+
+    try {
+      // 1. Match code confirmation profile credentials
+      const { error: otpError } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: otpToken.trim(),
+        type: 'recovery',
+      });
+
+      if (otpError) {
+        setErrorMsg(otpError.message || 'The recovery code provided is invalid or has expired.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Perform raw payload encryption switch override
+      const hashedPass = await hashPassword(newPassword);
+      const { error: dbError } = await supabase
+        .from('users')
+        .update({ pass: hashedPass })
+        .ilike('reg', cleanRoll);
+
+      if (dbError) {
+        setErrorMsg('Auth signature accepted, but user profile update rejected.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Sync authentication state engine password
+      await supabase.auth.updateUser({ password: newPassword });
+
+      setSuccessMsg('Your security credentials have been successfully updated. Routing to login...');
+      setTimeout(() => {
+        switchView('login');
+      }, 2500);
+    } catch (err) {
+      setErrorMsg('Critical password modification task exception.');
     } finally {
       setIsLoading(false);
     }
@@ -450,6 +533,7 @@ function LoginContent() {
               {view === 'forgot_password' && 'Reset Password'}
               {view === 'forgot_email' && 'Find Email'}
               {view === 'verify_otp' && 'Verify OTP'}
+              {view === 'reset_password' && 'New Credentials'}
             </h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-blue-300/70">
               {view === 'login' && 'Sign in using your Roll Number'}
@@ -457,6 +541,7 @@ function LoginContent() {
               {view === 'forgot_password' && 'Enter details to receive an OTP'}
               {view === 'forgot_email' && 'Enter your phone to reveal your email'}
               {view === 'verify_otp' && 'Enter the 6-digit verification code'}
+              {view === 'reset_password' && 'Complete your access authorization configuration'}
             </p>
           </div>
 
@@ -678,11 +763,46 @@ function LoginContent() {
                 {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify & Activate'}
               </button>
 
-              <div className="text-center pt-2">
-                <button type="button" onClick={() => switchView('signup')} className="text-xs font-bold text-blue-600 hover:underline dark:text-amber-400">
+              <div className="flex flex-col items-center justify-center space-y-3 pt-2 text-center">
+                <button 
+                  type="button" 
+                  disabled={resendCountdown > 0 || isLoading} 
+                  onClick={handleResendOtp}
+                  className="text-xs font-bold inline-flex items-center gap-1.5 text-blue-600 dark:text-amber-400 hover:underline disabled:opacity-50 disabled:no-underline"
+                >
+                  <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} />
+                  {resendCountdown > 0 ? `Resend Code (${resendCountdown}s)` : 'Resend Verification Code'}
+                </button>
+
+                <button type="button" onClick={() => switchView('signup')} className="text-xs font-bold text-gray-500 hover:underline dark:text-slate-400">
                   Back to Registration
                 </button>
               </div>
+            </form>
+          )}
+
+          {/* VIEW 6: COMPLETED PASSWORD RESET ENTRY */}
+          {view === 'reset_password' && (
+            <form onSubmit={handleCompletePasswordReset} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Reset Security Token</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><Lock size={18} /></div>
+                  <input type="text" value={otpToken} onChange={(e) => setOtpToken(e.target.value)} placeholder="6-digit recovery code" maxLength={6} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">New Account Password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400"><Lock size={18} /></div>
+                  <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Minimum 6 characters" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white" />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isLoading} className="flex w-full items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white py-3 text-sm font-black shadow-md uppercase tracking-wide disabled:opacity-70 transition-all">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Confirm New Password'}
+              </button>
             </form>
           )}
 
