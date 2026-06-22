@@ -2052,7 +2052,8 @@ export default function DashboardPage() {
                               : `Rs ${dep.amount} via ${dep.account_name}`}
                           </td>
                           <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                            {dep.package_id === 'referral_reward' ? '+ 850 CR' : dep.status.toUpperCase()}
+                            {/* Fixed display layout conditional values logic */}
+                            {dep.package_id === 'referral_reward' ? '+ 850 CR' : `Rs ${dep.amount}`}
                           </td>
                         </tr>
                       ))}
