@@ -125,143 +125,161 @@ function LoginContent() {
   };
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-    setIsLoading(true);
+      e.preventDefault();
+      clearMessages();
   
-    const supabase = getSupabase();
-    const cleanRollNumber = rollNumber.trim().toUpperCase();
+      const cleanRollNumber = rollNumber.trim().toUpperCase();
   
-    try {
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('email')
-        .ilike('reg', cleanRollNumber)
-        .maybeSingle();
-  
-      if (userError || !userData) {
-        setErrorMsg('Invalid Roll Number or Password.');
-        setIsLoading(false);
+      // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
+      const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
+      if (!regRegex.test(cleanRollNumber)) {
+        setErrorMsg('Invalid Registration Number format. Example: S25BARIN1M01118');
         return;
       }
   
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: userData.email.toLowerCase().trim(), 
-        password: password, 
-      });
-  
-      if (authError) {
-        setErrorMsg('Invalid Roll Number or Password.');
-      } else {
-        const { data: profile } = await supabase
+      setIsLoading(true);
+      const supabase = getSupabase();
+    
+      try {
+        const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('reg, phone, email')
+          .select('email')
           .ilike('reg', cleanRollNumber)
           .maybeSingle();
-  
-        const userState = { 
-          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
-          name: "Student", 
-          phone: profile?.phone || "", 
-          email: userData.email 
-        };
-        
-        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
-        setSuccessMsg('Login successful! Welcome back.');
-        
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 500);
-      }
-    } catch (err) {
-      setErrorMsg('An unexpected error occurred.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-
-    const cleanEmail = email.toLowerCase().trim();
-    const cleanRoll = rollNumber.trim().toUpperCase();
-
-    if (!cleanEmail.endsWith('@gmail.com')) {
-      setErrorMsg('Only @gmail.com email addresses are allowed.');
-      return;
-    }
-    const rawNumber = phone.replace(/-/g, '');
-    if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
-      setErrorMsg('You entered the wrong number. Enter your correct number otherwise your account can be compromised.');
-      return;
-    }
-
-    setIsLoading(true);
-    const supabase = getSupabase();
-    const hashedPassword = await hashPassword(password);
-
-    try {
-      // 1. Sign up user inside Supabase Auth engine
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: password,
-      });
-
-      if (authError) {
-        setErrorMsg(authError.message || 'Error setting up account authentication.');
+    
+        if (userError || !userData) {
+          setErrorMsg('Invalid Roll Number or Password.');
+          setIsLoading(false);
+          return;
+        }
+    
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: userData.email.toLowerCase().trim(), 
+          password: password, 
+        });
+    
+        if (authError) {
+          setErrorMsg('Invalid Roll Number or Password.');
+        } else {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('reg, phone, email')
+            .ilike('reg', cleanRollNumber)
+            .maybeSingle();
+    
+          const userState = { 
+            reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+            name: "Student", 
+            phone: profile?.phone || "", 
+            email: userData.email 
+          };
+          
+          localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+          setSuccessMsg('Login successful! Welcome back.');
+          
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 500);
+        }
+      } catch (err) {
+        setErrorMsg('An unexpected error occurred.');
+      } finally {
         setIsLoading(false);
+      }
+    };
+  
+    const handleSignup = async (e: React.FormEvent) => {
+      e.preventDefault();
+      clearMessages();
+  
+      const cleanEmail = email.toLowerCase().trim();
+      const cleanRoll = rollNumber.trim().toUpperCase();
+  
+      // 1. STRICT REGISTRATION FORMAT VALIDATION (NO SPACES, NO SPECIAL CHARACTERS)
+      const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
+      if (!regRegex.test(cleanRoll)) {
+        setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
         return;
       }
-
-      // 2. Insert the main user account profile record into public schema
-      const { error } = await supabase
-        .from('users')
-        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
-
-      if (error) {
-        if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
-        else setErrorMsg('Error creating account. Please try again.');
-      } else {
-        
-        // 3. SECURE REFERRAL ENGINE INTERACTION LINK
-        try {
-          const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
-          const cleanRoll = rollNumber.trim().toUpperCase();
-        
-          if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
-            const cleanReferrer = activeReferrer.toUpperCase().trim();
-            
-            const { error: refError } = await supabase
-              .from('referrals')
-              .insert({
-                referrer_reg: cleanReferrer,
-                referred_reg: cleanRoll
-              });
-        
-            if (refError) {
-              console.error("Database rejected referral coupling insert:", refError);
-            } else {
-              if (typeof window !== "undefined") {
-                localStorage.removeItem("referred_by");
+  
+      // 2. STRICT GMAIL VALIDATION
+      const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
+      if (!gmailRegex.test(cleanEmail)) {
+        setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
+        return;
+      }
+  
+      const rawNumber = phone.replace(/-/g, '');
+      if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
+        setErrorMsg('You entered the wrong number. Enter your correct number otherwise your account can be compromised.');
+        return;
+      }
+  
+      setIsLoading(true);
+      const supabase = getSupabase();
+      const hashedPassword = await hashPassword(password);
+  
+      try {
+        // Sign up user inside Supabase Auth engine
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: password,
+        });
+  
+        if (authError) {
+          setErrorMsg(authError.message || 'Error setting up account authentication.');
+          setIsLoading(false);
+          return;
+        }
+  
+        // Insert the main user account profile record into public schema
+        const { error } = await supabase
+          .from('users')
+          .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
+  
+        if (error) {
+          if (error.code === '23505') setErrorMsg('Roll Number or Email already exists.');
+          else setErrorMsg('Error creating account. Please try again.');
+        } else {
+          
+          // SECURE REFERRAL ENGINE INTERACTION LINK
+          try {
+            const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
+          
+            if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
+              const cleanReferrer = activeReferrer.toUpperCase().trim();
+              
+              const { error: refError } = await supabase
+                .from('referrals')
+                .insert({
+                  referrer_reg: cleanReferrer,
+                  referred_reg: cleanRoll
+                });
+          
+              if (refError) {
+                console.error("Database rejected referral coupling insert:", refError);
+              } else {
+                if (typeof window !== "undefined") {
+                  localStorage.removeItem("referred_by");
+                }
               }
             }
+          } catch (creditErr) {
+            console.error("Failed to safely process automatic structural ledger updates:", creditErr);
           }
-        } catch (creditErr) {
-          console.error("Failed to safely process automatic structural ledger updates:", creditErr);
+  
+          setSuccessMsg('Account created! A verification OTP has been sent to your email.');
+          setTimeout(() => {
+            setView('login');
+          }, 3000);
         }
-
-        setSuccessMsg('Account created! A verification OTP has been sent to your email.');
-        setTimeout(() => {
-          setView('login');
-        }, 3000);
+      } catch (err) {
+        setErrorMsg('An unexpected error occurred.');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      setErrorMsg('An unexpected error occurred.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+
   const handleForgotEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
