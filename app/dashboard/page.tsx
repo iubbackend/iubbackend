@@ -220,24 +220,27 @@ export default function DashboardPage() {
         if (userRecord?.reg) {
           actualReg = userRecord.reg; 
         } else {
-          // ⚡ FIX 2: Degrade gracefully. Don't call forceLogout() if network sync lags
+          // ⚡ FIX 2: Degrade gracefully. Let the code fall through to update the UI!
           console.warn("User profile data not returned from public ledger schema yet.");
           showToast("Profile Sync", "Could not verify your registration roll data. Please refresh.", "error");
-          return;
+          actualReg = "UNKNOWN"; 
         }
         
         let actualName = "Student";
-          if (actualReg !== "UNKNOWN") {
-            const { data: studentNameRes } = await supabase
-              .from("students")
-              .select("name")
-              .ilike("reg", actualReg.trim()) // Direct, case-insensitive, trims trailing/leading spaces
-              .maybeSingle();
-          
-            if (studentNameRes?.name) {
-              actualName = studentNameRes.name;
-            }
+        if (actualReg !== "UNKNOWN") {
+          // Strip all hidden spaces to ensure a perfect match
+          const safeReg = actualReg.replace(/\s+/g, '').trim();
+
+          const { data: studentNameRes } = await supabase
+            .from("students")
+            .select("name")
+            .ilike("reg", safeReg) 
+            .maybeSingle();
+        
+          if (studentNameRes?.name) {
+             actualName = studentNameRes.name;
           }
+        }
         
         const newUserState = { 
           reg: actualReg.toUpperCase(), 
