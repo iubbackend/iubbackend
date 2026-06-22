@@ -216,12 +216,7 @@ export default function DashboardPage() {
           .eq("email", session.user.email)
           .maybeSingle();
         
-        if (userRecord?.reg) {
-          actualReg = userRecord.reg; 
-        } else {
-          forceLogout();
-          return;
-        }
+        if (userRecord?.reg) { ... } else { forceLogout(); return; }
         
         let actualName = "Student";
         if (actualReg !== "UNKNOWN") {
