@@ -301,28 +301,6 @@ export default function DashboardPage() {
     
     fetchInitialData();
   }, [router]);
-        const newFilters = {
-          departments: (deptsRes.data || []).map(d => ({ id: d.id, value: d.id.toString(), label: `${d.depart_code} - ${d.depart_name}` })),
-          sessions: (sessionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.session_code })),
-          sections: (sectionsRes.data || []).map(s => ({ id: s.id, value: s.id.toString(), label: s.section_name, session_id: s.session_id, department_id: s.department_id }))
-        };
-        setFilterOptions(newFilters);
-        localStorage.setItem('iub_filterOptions', JSON.stringify(newFilters));
-
-        if (actualReg === ADMIN_REG) {
-          loadRealAdminData();
-          loadAdminChatList();
-        } else {
-          checkUnreadMessages(actualReg);
-        }
-
-      } catch (error) {
-        console.error("Critical error loading data:", error);
-      }
-    }
-    
-    fetchInitialData();
-  }, [router]);
 
   // REALTIME CHAT HANDLER
   useEffect(() => {
