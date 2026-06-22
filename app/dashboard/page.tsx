@@ -2038,16 +2038,24 @@ export default function DashboardPage() {
                      {historyLogs.deposits.length === 0 && historyLogs.usage.length === 0 && !creditsTabLoading && (
                        <tr><td colSpan={4} className="px-4 py-8 text-center opacity-50">No recent activity found.</td></tr>
                      )}
-                     {historyLogs.deposits.map((dep, i) => (
-                       <tr key={`dep-${i}`} className={t.rowHover}>
-                         <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(dep.created_at).toLocaleDateString()}</td>
-                         <td className="px-4 py-3 font-semibold text-emerald-500 flex items-center gap-1.5"><ArrowRight size={12} className="rotate-45"/> Deposit</td>
-                         <td className="px-4 py-3 opacity-80">Rs {dep.amount} via {dep.account_name}</td>
-                         <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                           {dep.status.toUpperCase()}
-                         </td>
-                       </tr>
-                     ))}
+                      {/* REPLACE the map internal row mapping line for deposits inside your table body layout: */}
+                      {historyLogs.deposits.map((dep, i) => (
+                        <tr key={`dep-${i}`} className={t.rowHover}>
+                          <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(dep.created_at).toLocaleDateString()}</td>
+                          <td className="px-4 py-3 font-semibold text-emerald-500 flex items-center gap-1.5">
+                            <ArrowRight size={12} className="rotate-45"/> 
+                            {dep.package_id === 'referral_reward' ? 'Referral Reward' : 'Deposit'}
+                          </td>
+                          <td className="px-4 py-3 opacity-80">
+                            {dep.package_id === 'referral_reward' 
+                              ? `Earned 850 credits via registration invite bonus.` 
+                              : `Rs ${dep.amount} via ${dep.account_name}`}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                            {dep.package_id === 'referral_reward' ? '+ 850 CR' : dep.status.toUpperCase()}
+                          </td>
+                        </tr>
+                      ))}
                      {historyLogs.usage.map((usg, i) => (
                        <tr key={`usg-${i}`} className={t.rowHover}>
                          <td className="px-4 py-3 font-mono opacity-70 text-[11px]">{new Date(usg.created_at).toLocaleDateString()}</td>
