@@ -33,7 +33,7 @@ function LoginContent() {
   
   // UI & Timeout States
   const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState<React.ReactNode>('');
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(0);
@@ -248,7 +248,7 @@ function LoginContent() {
           <span className="font-bold">IMPORTANT:</span> If you do not see it in your Inbox, check your SPAM/JUNK folder!
         </>
       );
-      setSuccessMsg(formattedMsg);
+      setSuccessMsg(formattedMsg as any);
       setResendCountdown(60);
       setTimeout(() => {
         clearMessages();
