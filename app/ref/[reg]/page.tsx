@@ -58,7 +58,7 @@ export default function ReferralPage({ params }: { params: { reg: string } }) {
   }, [referralCode]);
 
   const handleAcceptInvite = () => {
-    // Save the referral code to the browser so the login page can use it during signup
+    // Save the referral code to the browser so the login/signup page can use it
     if (typeof window !== "undefined") {
       localStorage.setItem("referred_by", referralCode);
     }
@@ -107,7 +107,7 @@ export default function ReferralPage({ params }: { params: { reg: string } }) {
               Accept Invite & Sign Up <ArrowRight size={18} />
             </button>
             <p className="text-[10px] text-blue-300/50 mt-4 uppercase tracking-wider font-semibold">
-              Your friend will earn a 20% bonus when you top up!
+              Your friend will earn 850 credits when you sign up!
             </p>
           </>
         ) : (
