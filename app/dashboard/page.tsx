@@ -22,7 +22,7 @@ const SEARCH_COST = 850;
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark"; // <--- MAKE SURE THIS EXACT LINE IS HERE!
-type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management" | "edit_courses";
+type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management";
 
 interface FilterItem {
   id: number;
