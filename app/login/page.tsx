@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2, MessageSquare, RefreshCw } from 'lucide-react';
+import { Mail, Lock, Loader2, Sun, Moon, Phone, User, ArrowLeft, Share2, MessageSquare, RefreshCw, Eye, EyeOff } from 'lucide-react';
 
 // --- NATIVE BROWSER HASHING HELPER ---
 async function hashPassword(password: string) {
@@ -11,6 +11,54 @@ async function hashPassword(password: string) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// --- FUZZY MATCH HELPER FOR TYPOS ---
+function isNameMatch(input: string, dbStr: string) {
+  if (!input || !dbStr) return false;
+  
+  const cleanInput = input.toLowerCase().replace(/[^a-z]/g, '');
+  const cleanDb = dbStr.toLowerCase().replace(/[^a-z]/g, '');
+  
+  if (cleanInput === cleanDb) return true;
+  if (cleanDb.includes(cleanInput) || cleanInput.includes(cleanDb)) return true;
+
+  const getDistance = (a: string, b: string) => {
+    const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+    for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+    for (let j = 1; j <= b.length; j++) {
+      for (let i = 1; i <= a.length; i++) {
+        const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i] + 1,
+          matrix[j - 1][i - 1] + indicator
+        );
+      }
+    }
+    return matrix[b.length][a.length];
+  };
+
+  if (getDistance(cleanInput, cleanDb) <= 3) return true;
+
+  const inputWords = input.toLowerCase().split(/\s+/);
+  const dbWords = dbStr.toLowerCase().split(/\s+/);
+  const dbParts = [...dbWords];
+  
+  for (let i = 0; i < dbWords.length - 1; i++) {
+    dbParts.push(dbWords[i] + dbWords[i + 1]);
+  }
+
+  for (const iWord of inputWords) {
+    if (iWord.length < 3) continue;
+    for (const dPart of dbParts) {
+      if (getDistance(iWord, dPart) <= 2) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 type ViewState = 'login' | 'signup' | 'forgot_password' | 'forgot_email' | 'verify_otp' | 'reset_password';
@@ -31,6 +79,12 @@ function LoginContent() {
   const [otpToken, setOtpToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   
+  // New States for verification and visibility
+  const [showPassword, setShowPassword] = useState(false);
+  const [studentName, setStudentName] = useState('');
+  const [isRollVerified, setIsRollVerified] = useState(false);
+  const [dbStudentName, setDbStudentName] = useState('');
+  
   // UI & Timeout States
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -44,7 +98,6 @@ function LoginContent() {
     return createBrowserClient(supabaseUrl, supabaseKey);
   };
 
-  // Resend timer countdown logic
   useEffect(() => {
     if (resendCountdown > 0) {
       const timer = setTimeout(() => setResendCountdown(resendCountdown - 1), 1000);
@@ -52,7 +105,6 @@ function LoginContent() {
     }
   }, [resendCountdown]);
 
-  // --- AUTOMATED REFERRAL EXTRACTOR & TRACKER ---
   useEffect(() => {
     let ref = searchParams.get('ref');
 
@@ -83,7 +135,6 @@ function LoginContent() {
     setIsDarkMode(isDark);
   }, [searchParams]);
 
-  // COLOR MODE PERSISTENCE
   useEffect(() => {
     const savedTheme = localStorage.getItem("iub_theme");
     if (savedTheme === "light") {
@@ -115,6 +166,9 @@ function LoginContent() {
 
   const switchView = (newView: ViewState) => {
     setView(newView);
+    setIsRollVerified(false);
+    setStudentName('');
+    setShowPassword(false);
     clearMessages();
   };
 
@@ -184,21 +238,67 @@ function LoginContent() {
       setIsLoading(false);
     }
   };
-  
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
+
+  // Nwe Verification Step for Signup
+  const handleVerifyRoll = async () => {
     clearMessages();
-  
-    const cleanEmail = email.toLowerCase().trim();
     const cleanRoll = rollNumber.trim().toUpperCase();
-  
+    
     const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
     if (!regRegex.test(cleanRoll)) {
       setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
       return;
     }
+
+    setIsLoading(true);
+    const supabase = getSupabase();
+
+    try {
+      const { data: duplicateCheck } = await supabase
+        .from('users')
+        .select('reg')
+        .ilike('reg', cleanRoll)
+        .maybeSingle();
+
+      if (duplicateCheck) {
+        setErrorMsg('Roll Number profile already exists.');
+        setIsLoading(false);
+        return;
+      }
+
+      const { data: studentRecord, error } = await supabase
+        .from('students')
+        .select('name')
+        .ilike('reg', cleanRoll)
+        .maybeSingle();
+
+      if (error || !studentRecord) {
+        setErrorMsg('This Roll Number is not exist in record Enter Correct Registration Number');
+      } else {
+        setDbStudentName(studentRecord.name);
+        setIsRollVerified(true);
+        setSuccessMsg('Registration verified. Please complete your profile.');
+      }
+    } catch (err) {
+      setErrorMsg('An unexpected error occurred.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+
+    if (!isNameMatch(studentName, dbStudentName)) {
+      setErrorMsg('Your name is not matching with your reg or this is not your Reg');
+      return;
+    }
+  
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanRoll = rollNumber.trim().toUpperCase();
     const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
+    
     if (!gmailRegex.test(cleanEmail)) {
       setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
       return;
@@ -214,20 +314,18 @@ function LoginContent() {
     const supabase = getSupabase();
   
     try {
-      // 1. Check if profile configuration mapping conflicts before prompting engine
-      const { data: duplicateCheck } = await supabase
+      const { data: emailDuplicateCheck } = await supabase
         .from('users')
-        .select('reg, email')
-        .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`)
+        .select('email')
+        .ilike('email', cleanEmail)
         .maybeSingle();
 
-      if (duplicateCheck) {
-        setErrorMsg('Roll Number or Email domain profile already exists.');
+      if (emailDuplicateCheck) {
+        setErrorMsg('Email domain profile already exists.');
         setIsLoading(false);
         return;
       }
 
-      // 2. Auth signup configuration request without database injection
       const { error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
@@ -270,7 +368,6 @@ function LoginContent() {
     const rawNumber = phone.replace(/-/g, '');
 
     try {
-      // 1. Validate Token configuration session status
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
@@ -283,7 +380,6 @@ function LoginContent() {
         return;
       }
 
-      // 2. Safe profile injection post-verification success checkpoint
       const hashedPassword = await hashPassword(password);
       const { error: insertError } = await supabase
         .from('users')
@@ -299,7 +395,6 @@ function LoginContent() {
         return;
       }
 
-      // 3. SECURE REFERRAL ENGINE INTERACTION LINK
       try {
         const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
         if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
@@ -380,7 +475,19 @@ function LoginContent() {
       if (error || !data) {
         setErrorMsg('No account found matching this phone number layout sequence.');
       } else {
-        setSuccessMsg(`Your registered email is: ${data.email}`);
+        const maskEmail = (emailStr: string) => {
+          if (!emailStr) return '';
+          const [namePart, domainPart] = emailStr.split('@');
+          if (namePart.length <= 3) {
+            return `${namePart.charAt(0)}***${namePart.slice(-1)}@${domainPart}`;
+          }
+          const start = namePart.substring(0, 2);
+          const end = namePart.slice(-1);
+          const maskedName = start + '*'.repeat(namePart.length - 3) + end;
+          return `${maskedName}@${domainPart}`;
+        };
+        
+        setSuccessMsg(`Your registered email is: ${maskEmail(data.email)}`);
       }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
@@ -399,7 +506,6 @@ function LoginContent() {
     const cleanEmail = email.toLowerCase().trim();
 
     try {
-      // 1. Verify user profile mapping exists in your custom public schema first
       const { data, error: matchError } = await supabase
         .from('users')
         .select('id')
@@ -413,11 +519,10 @@ function LoginContent() {
         return;
       }
 
-      // 2. ⚡ FIX: Fire numeric token OTP handshake instead of standard absolute redirect link
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          shouldCreateUser: false, // Prevents creating a fresh account if it doesn't match
+          shouldCreateUser: false,
         },
       });
       
@@ -453,7 +558,6 @@ function LoginContent() {
     const cleanRoll = rollNumber.trim().toUpperCase();
 
     try {
-      // 1. Validate code input
       const { error: otpError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
@@ -466,7 +570,6 @@ function LoginContent() {
         return;
       }
 
-      // 2. Perform encryption and DB update
       const hashedPass = await hashPassword(newPassword);
       const { error: dbError } = await supabase
         .from('users')
@@ -479,7 +582,6 @@ function LoginContent() {
         return;
       }
 
-      // 3. Sync Auth password
       await supabase.auth.updateUser({ password: newPassword });
 
       setSuccessMsg('Your credentials have been updated. Routing to login...');
@@ -496,7 +598,6 @@ function LoginContent() {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 text-slate-800 dark:bg-[#00122a] dark:text-slate-100 font-sans transition-colors duration-300 overflow-x-hidden relative">
       
-      {/* 1. MATCHED INTEGRATED HEADER SYSTEM */}
       <header className="sticky top-0 z-40 backdrop-blur-xl border-b border-gray-200 bg-white/90 dark:border-[#00348c]/50 dark:bg-[#00122a]/90 px-4 py-3.5 flex justify-between items-center">
         <div className="flex items-center gap-2.5 max-w-5xl mx-auto w-full justify-between">
           <div className="flex items-center gap-1.5 cursor-pointer">
@@ -516,7 +617,6 @@ function LoginContent() {
         </div>
       </header>
 
-      {/* 2. THIN MARQUEE SUB-HEADER INFOBAR */}
       <div className="w-full py-1.5 text-[10px] font-bold tracking-wide flex justify-center items-center gap-2 sm:gap-4 border-b border-gray-200 bg-gray-100 text-gray-600 dark:border-[#00348c]/50 dark:bg-[#000a1a]/80 dark:text-blue-400/60">
         <span>Check Result Before time</span>
         <span className="w-1 h-1 rounded-full bg-current opacity-50"></span>
@@ -525,7 +625,6 @@ function LoginContent() {
         <span>Other's Result</span>
       </div>
 
-      {/* 3. CORE CONTENT CENTER BODY INTERACTION WRAPPER */}
       <div className="flex-1 flex items-center justify-center p-4 md:py-12">
         <div className="w-full max-w-md rounded-2xl bg-white border border-gray-200 p-8 shadow-xl transition-colors duration-300 dark:bg-[#001c4d]/80 dark:border-[#00348c]/50">
           
@@ -605,13 +704,20 @@ function LoginContent() {
                     <Lock size={18} />
                   </div>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
-                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-10 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-amber-400"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -625,13 +731,12 @@ function LoginContent() {
                 </button>
                 
                 <div className="w-full text-center space-y-2">
-                  <p className="text-xs text-gray-500 dark:text-blue-300/50 font-medium">New to the portal layout?</p>
                   <button 
                     type="button" 
                     onClick={() => switchView('signup')} 
                     className="w-full py-2.5 rounded-xl border-2 border-dashed border-blue-600/50 text-blue-600 dark:border-amber-500/40 dark:text-amber-400 hover:bg-blue-500/5 dark:hover:bg-amber-500/5 font-bold transition-all text-xs"
                   >
-                    Create Fresh Account &rarr;
+                    Create Account &rarr;
                   </button>
                 </div>
               </div>
@@ -650,47 +755,81 @@ function LoginContent() {
                   <input 
                     type="text" 
                     value={rollNumber} 
-                    onChange={(e) => setRollNumber(e.target.value.toUpperCase())} 
+                    onChange={(e) => {
+                      setRollNumber(e.target.value.toUpperCase());
+                      setIsRollVerified(false);
+                    }} 
                     placeholder="e.g. S25BAID1M001" 
                     required 
-                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" 
+                    disabled={isRollVerified}
+                    className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500 disabled:opacity-60" 
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                    <Phone size={18} />
+              {!isRollVerified ? (
+                <button 
+                  type="button" 
+                  onClick={handleVerifyRoll} 
+                  disabled={isLoading} 
+                  className="mt-2 flex w-full items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-amber-500 dark:hover:bg-amber-600 font-black px-4 py-3 text-sm text-white dark:text-[#00122a] shadow-md disabled:opacity-70 transition-all uppercase tracking-wider"
+                >
+                  {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify Roll Number'}
+                </button>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Your Name</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <User size={18} />
+                      </div>
+                      <input 
+                        type="text" 
+                        value={studentName} 
+                        onChange={(e) => setStudentName(e.target.value)} 
+                        placeholder="e.g. Muhammad Abu Bakar" 
+                        required 
+                        className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" 
+                      />
+                    </div>
                   </div>
-                  <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Email Address</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                    <Mail size={18} />
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Phone size={18} />
+                      </div>
+                      <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
                   </div>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. student@gmail.com" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Password</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                    <Lock size={18} />
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Email Address</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Mail size={18} />
+                      </div>
+                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. student@gmail.com" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
                   </div>
-                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                </div>
-              </div>
 
-              <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 hover:bg-green-700 font-black px-4 py-3 text-sm text-white shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
-                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Complete Registration'}
-              </button>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Password</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Lock size={18} />
+                      </div>
+                      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
+                  </div>
+
+                  <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 hover:bg-green-700 font-black px-4 py-3 text-sm text-white shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
+                    {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Complete Registration'}
+                  </button>
+                </>
+              )}
 
               <div className="pt-4 border-t border-gray-200 dark:border-[#00348c]/30 text-center">
                 <button type="button" onClick={() => switchView('login')} className="text-xs font-bold text-blue-600 dark:text-amber-400 hover:underline">
@@ -821,7 +960,6 @@ function LoginContent() {
         </div>
       </div>
 
-      {/* 4. BEAUTIFUL NANO HELPLINE FOOTER */}
       <footer className="w-full py-4 text-center text-xs font-semibold tracking-wide border-t border-gray-200 bg-white text-gray-500 dark:border-[#00348c]/30 dark:bg-[#000a1a]/60">
         <a 
           href="mailto:iubbackend@gmail.com" 
