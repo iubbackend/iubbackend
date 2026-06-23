@@ -435,17 +435,7 @@ useEffect(() => {
           } catch(e) { showToast('Error', 'Update failed.', 'error'); }
       }
   };
-
-      const sorted = unique.sort((a, b) => {
-        const numA = parseInt(a.sem?.replace(/\D/g, '')) || 0;
-        const numB = parseInt(b.sem?.replace(/\D/g, '')) || 0;
-        return numB - numA;
-      });
-
-      setEditableCourses(sorted);
-    } catch(e) {}
-  };
-
+  
   const loadCreditsHistory = async (page = 1) => {
     setCreditsTabLoading(true);
     setWalletPage(page);
