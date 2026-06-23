@@ -1191,7 +1191,7 @@ export default function DashboardPage() {
 
               <button 
                 onClick={() => setActiveTab("credits")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d]' hover:bg-[#002a70]'} transition-all text-xs font-bold`}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold`}
               >
                 <Wallet size={14} className={t.primary} />
                 <span>{credits.toLocaleString()}</span>
@@ -1786,7 +1786,7 @@ export default function DashboardPage() {
                                             <th className="px-2 py-2 text-center font-bold">Pr.F</th>
                                             <th className="px-2 py-2 text-center font-bold">Tot</th>
                                           </tr>
-                                         anisotropy                 </thead>
+                                        </thead>
                                         <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                                           {sem.courses.map((course: any, cIdx: number) => (
                                             <tr key={cIdx} className={t.rowHover}>
