@@ -111,11 +111,6 @@ export default function DashboardPage() {
   const [manageUsersPage, setManageUsersPage] = useState(0);
   const [manageUsersSearch, setManageUsersSearch] = useState("");
 
-  // USER COURSES STATES
-  const [editableCourses, setEditableCourses] = useState<any[]>([]);
-  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
-  const [courseForm, setCourseForm] = useState({ name: "", credits: 3 });
-
   // CHAT STATES
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -361,9 +356,7 @@ useEffect(() => {
     if (activeTab === "history") loadPaidSearchHistory();
     if (activeTab === "contact" && !isAdmin) loadUserChat();
     if (activeTab === "admin_chats" && isAdmin) loadAdminChatList();
-    if (activeTab === "users_management" && isAdmin) loadManageUsers(0);
-    if (activeTab === "edit_courses" && !isAdmin) loadEditableCourses();
-    
+    if (activeTab === "users_management" && isAdmin) loadManageUsers(0);    
     if ((activeTab === "approvals" || activeTab === "leaderboard" || activeTab === "home") && isAdmin) {
       loadRealAdminData();
     }
@@ -443,23 +436,6 @@ useEffect(() => {
       }
   };
 
-  const loadEditableCourses = async () => {
-    try {
-      const { data: student } = await supabase.from('students').select('id').eq('reg', currentUser.reg).single();
-      if (!student) return;
-      
-      // Select correctly matches columns mapping definitions inside 'courses' table schema natively
-      const { data: results } = await supabase.from('results').select('id, semester, subject_id(id, course_code, course_name, credit_hours)').eq('student_id', student.id);
-      
-      const unique: any[] = [];
-      const seen = new Set();
-      results?.forEach((r: any) => {
-         if(r.subject_id && !seen.has(r.subject_id.id)) {
-             seen.add(r.subject_id.id);
-             unique.push({ result_id: r.id, sem: r.semester, ...r.subject_id });
-         }
-      });
-      
       const sorted = unique.sort((a, b) => {
         const numA = parseInt(a.sem?.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.sem?.replace(/\D/g, '')) || 0;
@@ -1280,9 +1256,6 @@ const handleAdminReject = async (paymentId: string) => {
 
                 {!isAdmin && (
                   <>
-                    <button onClick={() => { setActiveTab('edit_courses'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'edit_courses' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
-                      <BookOpen size={18} /> Edit Course details
-                    </button>
                     <button onClick={() => { setActiveTab('credits'); setSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium ${activeTab === 'credits' ? t.btnPrimary : "hover:bg-slate-500/10"}`}>
                       <CreditCard size={18} /> Credits & Wallet
                     </button>
@@ -1319,132 +1292,6 @@ const handleAdminReject = async (paymentId: string) => {
              <button onClick={installPWA} className={`px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider shadow-md active:scale-95 transition-all ${theme === 'light' ? 'bg-white text-[#0056b3] hover:bg-slate-100' : 'bg-[#00122a] text-amber-500 hover:bg-slate-900'}`}>
                Install Now
              </button>
-          </motion.div>
-        )}
-
-        {/* TAB: NORMAL USER EDIT COURSES */}
-        {!isAdmin && activeTab === "edit_courses" && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-black mb-1 flex items-center gap-2"><BookOpen className={t.primary} /> Course Details</h2>
-              <p className="opacity-70 text-xs">Modify course titles or credit hours. Click Save on the course row to update the live database.</p>
-            </div>
-        
-            {editableCourses.length === 0 ? (
-              <div className="text-center p-8 opacity-50 border rounded-2xl">No academic courses found.</div>
-            ) : (
-              <div className="space-y-8">
-                {Array.from(new Set(editableCourses.map(c => c.sem || "General Data"))).map((semesterName) => (
-                  <div key={semesterName} className="space-y-3">
-                    <div className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${t.border} ${theme === 'light' ? 'bg-slate-100 text-[#0056b3]' : 'bg-[#00122a] text-amber-400'}`}>
-                      {getSemesterNumber(currentUser.reg, semesterName)}
-                    </div>
-        
-                    <div className="grid grid-cols-1 gap-3">
-                      {editableCourses.filter(c => (c.sem || "General Data") === semesterName).map((course) => {
-                        const isEditingThis = editingCourseId === course.id;
-        
-                        return (
-                          <div key={course.id} className={`${t.cardBg} border ${t.border} p-4 rounded-xl flex flex-col sm:flex-row gap-4 justify-between sm:items-center shadow-sm transition-all`}>
-                            <div className="flex-1">
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-semibold mb-1.5 inline-block ${theme === 'light' ? 'bg-slate-50 border-slate-300' : 'bg-[#00122a] border-[#00348c]'}`}>
-                                {course.course_code}
-                              </span>
-                              
-                              {isEditingThis ? (
-                                <input 
-                                  type="text" 
-                                  value={courseForm.name}
-                                  onChange={(e) => {
-                                    const formatted = e.target.value.replace(/\b\w/g, char => char.toUpperCase());
-                                    setCourseForm(prev => ({ ...prev, name: formatted }));
-                                  }}
-                                  className="w-full font-bold text-sm bg-transparent border-b border-amber-500 py-0.5 focus:outline-none bg-slate-500/5 px-1.5 rounded" 
-                                  placeholder="Course Title"
-                                  autoFocus
-                                />
-                              ) : (
-                                <div className="font-bold text-sm py-0.5 opacity-90">{course.course_name}</div>
-                              )}
-                            </div>
-                            
-                            <div className="flex items-center gap-4 justify-between sm:justify-end">
-                              <div className="flex flex-col">
-                                <span className="text-[9px] font-bold uppercase opacity-50 mb-0.5">Cr. Hours</span>
-                                {isEditingThis ? (
-                                  <select 
-                                    value={courseForm.credits} 
-                                    onChange={(e) => setCourseForm(prev => ({ ...prev, credits: Number(e.target.value) }))}
-                                    className={`bg-transparent text-xs border ${t.border} rounded-lg px-2.5 py-1 focus:outline-none focus:border-amber-500`}
-                                  >
-                                    <option className="text-black" value="2">2</option>
-                                    <option className="text-black" value="3">3</option>
-                                    <option className="text-black" value="4">4</option>
-                                  </select>
-                                ) : (
-                                  <span className="text-xs font-mono font-bold px-2">{course.credit_hours}</span>
-                                )}
-                              </div>
-        
-                              <div className="flex items-center gap-1.5 pt-3 sm:pt-0">
-                                {isEditingThis ? (
-                                  <>
-                                    <button 
-                                      onClick={() => { setEditingCourseId(null); }}
-                                      className="px-2.5 py-1.5 text-xs font-bold rounded-lg opacity-60 hover:opacity-100 transition-opacity"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button 
-                                      onClick={async () => {
-                                        if (![2, 3, 4].includes(courseForm.credits)) {
-                                          return showToast('Error', 'Credit hours must be 2, 3, or 4', 'error');
-                                        }
-                                        try {
-                                          const { error } = await supabase
-                                            .from('courses') 
-                                            .update({ 
-                                              course_name: courseForm.name.trim(), 
-                                              credit_hours: Number(courseForm.credits) 
-                                            })
-                                            .eq('id', course.id);
-        
-                                          if (error) throw error;
-                                          
-                                          showToast('Success', 'Course details synced to cloud.', 'info');
-                                          setEditingCourseId(null);
-                                          loadEditableCourses(); 
-                                        } catch(e) {
-                                          showToast('Error', 'Database synchronization failed.', 'error');
-                                        }
-                                      }}
-                                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition-colors"
-                                    >
-                                      Save
-                                    </button>
-                                  </>
-                                ) : (
-                                  <button 
-                                    onClick={() => {
-                                      setEditingCourseId(course.id);
-                                      setCourseForm({ name: course.course_name, credits: course.credit_hours });
-                                    }}
-                                    className="p-1.5 rounded-lg opacity-60 hover:opacity-100 hover:bg-slate-500/10 transition-all"
-                                    title="Edit Row"
-                                  >
-                                    <Edit2 size={14} className={t.primary} />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </motion.div>
         )}
 
