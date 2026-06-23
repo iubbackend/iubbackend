@@ -1926,9 +1926,26 @@ const handleAdminReject = async (paymentId: string) => {
                     <p>Warning: Submitting fake or unpaid requests will result in an immediate account blockage.</p>
                   </div>
                   
-                  <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}>
-                    <CheckCircle2 size={18}/> I have Paid!
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-end items-center pt-2">
+                    <button 
+                      type="button"
+                      onClick={shareToWhatsApp} 
+                      className="w-full sm:w-auto px-6 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397 0 11.945 0c3.171.001 6.152 1.234 8.394 3.477 2.242 2.242 3.472 5.224 3.47 8.397-.006 6.598-5.345 11.946-11.894 11.946-2.015-.001-3.992-.511-5.741-1.486L0 24zm6.59-4.846c1.666.988 3.311 1.503 5.3 1.505 5.517 0 10.005-4.487 10.01-10.008.002-2.675-1.039-5.19-2.93-7.082C17.075 1.677 14.562 1.036 11.945 1.036 6.43 1.036 1.94 5.523 1.935 11.047c-.001 2.012.52 3.618 1.523 5.213l-.995 3.635 3.73-.978z"/>
+                      </svg>
+                      Share Receipt on WhatsApp
+                    </button>
+                    
+                    <button 
+                      type="button"
+                      onClick={handlePaymentSubmit} 
+                      className={`w-full sm:w-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}
+                    >
+                      <CheckCircle2 size={18}/> I have Paid!
+                    </button>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
