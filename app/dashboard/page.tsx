@@ -192,7 +192,7 @@ export default function DashboardPage() {
     return () => { authListener.subscription.unsubscribe(); };
   }, [router]);
 
-  useEffect(() => {
+useEffect(() => {
     async function fetchInitialData() {
       try {
         const cachedFilters = localStorage.getItem('iub_filterOptions');
@@ -201,9 +201,21 @@ export default function DashboardPage() {
         const cachedStats = localStorage.getItem('iub_adminStats');
         if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
 
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        // Optimized token validation lookup chain
+        let userEmail: string | undefined;
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          userEmail = session.user.email;
+        } else {
+          // Hard fallback verification check if token cache is fresh but unread
+          const { data: { user }, error: authError } = await supabase.auth.getUser();
+          if (!authError && user?.email) {
+            userEmail = user.email;
+          }
+        }
 
-        if (authError || !user?.email) {
+        if (!userEmail) {
           router.push('/login');
           return;
         }
@@ -212,7 +224,7 @@ export default function DashboardPage() {
         const { data: userRecord } = await supabase
           .from("users")
           .select("reg, phone, email")
-          .ilike("email", user.email.trim())
+          .ilike("email", userEmail.trim())
           .maybeSingle();
         
         if (userRecord?.reg) {
@@ -296,7 +308,6 @@ export default function DashboardPage() {
     
     fetchInitialData();
   }, [router]);
-
   // REALTIME CHAT HANDLER
   useEffect(() => {
     if (!currentUser.reg) return;
