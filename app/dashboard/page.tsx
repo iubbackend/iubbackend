@@ -1077,6 +1077,14 @@ export default function DashboardPage() {
     }
   };
 
+  const executeReSearch = (query: string) => {
+    setActiveTab("home");
+    const mode = (query.length >= 8 && query.match(/[0-9]/)) ? "Roll Number" : "Name";
+    setSearchMode(mode);
+    setSearchQuery(query);
+    handleSearch(undefined, 0, query, mode);
+  };
+
   const packages = [
     { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Solo Student' },
     { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Friends Plan', pop: true },
