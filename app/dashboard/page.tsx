@@ -1126,32 +1126,31 @@ const handleAdminReject = async (paymentId: string) => {
       // Keep form values for a moment so WhatsApp hook can read them, but show WhatsApp option
       setIsPaymentSubmitted(true); 
       loadCreditsHistory(1);
-    } catch(e) {
-      showToast("Error", "Submission failed", "error");
-    }
-  };
-
-  const shareToWhatsApp = () => {
-    const selectedPkg = packages.find(p => p.id === paymentForm.package);
-    const finalAmount = paymentForm.package === 'custom' ? paymentForm.amount : selectedPkg?.amount;
-    
-    if (!paymentForm.name || !paymentForm.tid || !finalAmount) {
-      return showToast("Missing Data", "Fill out Name, TID, and Amount before sharing.", "error");
-    }
-
-    const message = `Hello Admin, I have submitted a deposit confirmation request.%0A%0A` +
-                    `*Registration:* ${currentUser.reg}%0A` +
-                    `*Name:* ${paymentForm.name}%0A` +
-                    `*Amount:* Rs. ${finalAmount}%0A` +
-                    `*TID Number:* ${paymentForm.tid}%0A%0A` +
-                    `Please verify and approve my account credits. Thanks!`;
-                    
-    window.open(`https://wa.me/923119277832?text=${message}`, '_blank');
-  };
-
-  return (
-    <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden text-[13px] sm:text-sm`}>
+      } catch(e) {
+            showToast("Error", "Submission failed", "error");
+          }
+        };
       
+        const shareToWhatsApp = () => {
+          const selectedPkg = packages.find(p => p.id === paymentForm.package);
+          const finalAmount = paymentForm.package === 'custom' ? paymentForm.amount : selectedPkg?.amount;
+          
+          if (!paymentForm.name || !paymentForm.tid || !finalAmount) {
+            return showToast("Missing Data", "Fill out Name, TID, and Amount before sharing.", "error");
+          }
+      
+          const message = `Hello Admin, I have submitted a deposit confirmation request.%0A%0A` +
+                          `*Registration:* ${currentUser.reg}%0A` +
+                          `*Name:* ${paymentForm.name}%0A` +
+                          `*Amount:* Rs. ${finalAmount}%0A` +
+                          `*TID Number:* ${paymentForm.tid}%0A%0A` +
+                          `Please verify and approve my account credits. Thanks!`;
+                          
+          window.open(`https://wa.me/923119277832?text=${message}`, '_blank');
+        };
+      
+        return (
+          <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden text-[13px] sm:text-sm`}>      
       <AnimatePresence>
         {toastMsg && (
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
