@@ -1101,10 +1101,17 @@ const handleAdminReject = async (paymentId: string) => {
     }
 
     if (!paymentForm.name || !paymentForm.tid || !paymentForm.package) return showToast("Missing Fields", "Fill all details", "error");
-    if (paymentForm.package === 'custom' && (!paymentForm.amount || isNaN(Number(paymentForm.amount)))) return showToast("Invalid Amount", "Enter valid amount", "error");
     
     const selectedPkg = packages.find(p => p.id === paymentForm.package);
     const finalAmount = paymentForm.package === 'custom' ? Number(paymentForm.amount) : selectedPkg?.amount;
+
+    // New validation checkpoint: Ensure amount is valid and meets the Rs. 300 baseline requirement
+    if (!finalAmount || isNaN(finalAmount)) {
+      return showToast("Invalid Amount", "Please enter a valid amount", "error");
+    }
+    if (finalAmount < 300) {
+      return showToast("Limit Enforced", "The minimum acceptable top-up amount is Rs. 300", "error");
+    }
 
     try {
       await supabase.from("payments_record").insert({
@@ -1120,6 +1127,24 @@ const handleAdminReject = async (paymentId: string) => {
     } catch(e) {
       showToast("Error", "Submission failed", "error");
     }
+  };
+
+  const shareToWhatsApp = () => {
+    const selectedPkg = packages.find(p => p.id === paymentForm.package);
+    const finalAmount = paymentForm.package === 'custom' ? paymentForm.amount : selectedPkg?.amount;
+    
+    if (!paymentForm.name || !paymentForm.tid || !finalAmount) {
+      return showToast("Missing Data", "Fill out Name, TID, and Amount before sharing.", "error");
+    }
+
+    const message = `Hello Admin, I have submitted a deposit confirmation request.%0A%0A` +
+                    `*Registration:* ${currentUser.reg}%0A` +
+                    `*Name:* ${paymentForm.name}%0A` +
+                    `*Amount:* Rs. ${finalAmount}%0A` +
+                    `*TID Number:* ${paymentForm.tid}%0A%0A` +
+                    `Please verify and approve my account credits. Thanks!`;
+                    
+    window.open(`https://wa.me/923119277832?text=${message}`, '_blank');
   };
 
   return (
