@@ -18,7 +18,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
-const SEARCH_COST = 850; 
+const SEARCH_COST = 1500; 
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark"; // <--- MAKE SURE THIS EXACT LINE IS HERE!
@@ -1931,11 +1931,11 @@ const handleAdminReject = async (paymentId: string) => {
                          </td>
                          <td className="px-4 py-3 opacity-80">
                            {dep.package_id === 'referral_reward' 
-                             ? `Earned 850 credits via registration invite bonus.` 
+                             ? `Earned 400 credits via registration invite bonus.` 
                              : `Rs ${dep.amount} via ${dep.account_name}`}
                          </td>
                          <td className={`px-4 py-3 text-right font-bold ${dep.status === 'approved' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                           {dep.package_id === 'referral_reward' ? '+ 850 CR' : `Rs ${dep.amount}`}
+                           {dep.package_id === 'referral_reward' ? '+ 400 Credits' : `Rs ${dep.amount}`}
                          </td>
                        </tr>
                      ))}
@@ -1997,7 +1997,7 @@ const handleAdminReject = async (paymentId: string) => {
               <Share2 size={30} />
             </div>
             <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
-            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up, you instantly earn 850 reward credits added to your wallet balance!</p>
+            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up, you instantly earn 400 reward credits added to your wallet balance! You can invite upto 4 Students per Day.</p>
             <div className={`max-w-md mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono flex justify-between items-center pl-4 shadow-inner`}>
               <span className="truncate opacity-80 font-semibold text-[12px]">https://iubbackend.vercel.app/ref/{currentUser.reg}</span>
               <button onClick={() => { navigator.clipboard.writeText(`https://iubbackend.vercel.app/ref/${currentUser.reg}`); showToast("Copied!", "Referral link copied to clipboard", "info"); }} className={`${t.btnPrimary} px-5 py-2 rounded-lg font-bold shadow-md active:scale-95 transition-transform`}>Copy</button>
