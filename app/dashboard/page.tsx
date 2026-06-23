@@ -959,16 +959,47 @@ const handleAdminReject = async (paymentId: string) => {
         return;
       }
 
+      // Force string stabilization to clear out random casing or trailing whitespaces
+      const normalizedReg = currentUser.reg.toUpperCase().trim();
+
       if (isPro) {
-        await supabase.rpc('deduct_credits', { p_user_reg: currentUser.reg, p_cost: SEARCH_COST });
-        setCredits(p => p - SEARCH_COST);
-        logSearch(reg, "Paid Search");
+        try {
+          const { error: rpcError } = await supabase.rpc('deduct_credits', { 
+            p_user_reg: normalizedReg, 
+            p_cost: SEARCH_COST 
+          });
+          
+          if (rpcError) throw rpcError;
+
+          setCredits(p => Math.max(0, p - SEARCH_COST));
+          logSearch(reg, "Paid Search");
+        } catch (err) {
+          console.error("Deduction backend validation exception:", err);
+          showToast("Transaction Failed", "Could not verify search tokens safely. Please retry.", "error");
+          return; // Halts execution to protect your business logic from database exploits
+        }
       } else {
-        await supabase.rpc('deduct_free_attempt', { p_user_reg: currentUser.reg });
-        setFreeAttempts(p => p - 1);
-        logSearch(reg, "Free Search");
+        try {
+          const { error: rpcError } = await supabase.rpc('deduct_free_attempt', { 
+            p_user_reg: normalizedReg 
+          });
+          
+          if (rpcError) throw rpcError;
+
+          setFreeAttempts(p => Math.max(0, p - 1));
+          logSearch(reg, "Free Search");
+        } catch (err) {
+          console.error("Free track counter mutation error:", err);
+          showToast("Sync Error", "Could not update free validation attempts.", "error");
+          return;
+        }
       }
-      setUnlockedRegs(prev => new Set(prev).add(reg));
+
+      setUnlockedRegs(prev => {
+        const nextSet = new Set(prev);
+        nextSet.add(reg);
+        return nextSet;
+      });
     }
 
     setExpandedReg(reg);
