@@ -1895,6 +1895,12 @@ const handleAdminReject = async (paymentId: string) => {
                     <input type="text" placeholder="TID Number of Receipt" value={paymentForm.tid} onChange={(e) => setPaymentForm({...paymentForm, tid: e.target.value})}
                       className={`w-full ${t.inputBg} border ${t.border} rounded-xl py-3 px-4 focus:outline-none ${t.inputFocus}`} />
                   </div>
+
+                  <div className="mt-3 mb-2 flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl text-[12px] sm:text-xs font-semibold">
+                    <ShieldAlert size={16} className="shrink-0 animate-pulse" />
+                    <p>Warning: Submitting fake or unpaid requests will result in an immediate account blockage.</p>
+                  </div>
+                  
                   <button onClick={handlePaymentSubmit} className={`w-full sm:w-auto ml-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}>
                     <CheckCircle2 size={18}/> I have Paid!
                   </button>
