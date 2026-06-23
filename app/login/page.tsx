@@ -380,17 +380,36 @@ function LoginContent() {
         return;
       }
 
+// 2. Safe profile injection post-verification success checkpoint
       const hashedPassword = await hashPassword(password);
-      const { error: insertError } = await supabase
+      
+      // First, check if the record already managed to get into the database
+      const { data: existingRecord } = await supabase
         .from('users')
-        .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
+        .select('reg')
+        .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`)
+        .maybeSingle();
 
-      if (insertError) {
-        if (insertError.code === '23505') {
-          setErrorMsg('Roll Number or Email already exists in the ledger schema.');
-        } else {
-          setErrorMsg('Auth succeeded, but database profile creation failed. Contact support.');
-        }
+      let dbError = null;
+
+      if (existingRecord) {
+        // If it exists (due to a trigger or previous test), safely update it with the verified info
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ phone: rawNumber, pass: hashedPassword, email: cleanEmail, reg: cleanRoll })
+          .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`);
+        dbError = updateError;
+      } else {
+        // If it's completely new, insert it
+        const { error: insertError } = await supabase
+          .from('users')
+          .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
+        dbError = insertError;
+      }
+
+      if (dbError) {
+        setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
+        console.error("DB Sync Error:", dbError);
         setIsLoading(false);
         return;
       }
