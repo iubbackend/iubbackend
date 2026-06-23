@@ -1786,7 +1786,7 @@ export default function DashboardPage() {
                                       <table className="w-full text-left whitespace-nowrap">
                                         <thead className={`border-b ${t.border} text-opacity-80`}>
                                           <tr>
-                                            <th className="px-2 py-2 font-bold">Sub</th>
+                                            <th className="px-2 py-2 font-bold">Subject</th>
                                             <th className="px-2 py-2 text-center font-bold">Mid</th>
                                             <th className="px-2 py-2 text-center font-bold">Sess</th>
                                             <th className="px-2 py-2 text-center font-bold">Fin</th>
