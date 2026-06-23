@@ -21,7 +21,7 @@ const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
 const SEARCH_COST = 1500; 
 
 type SearchMode = "Roll Number" | "Name";
-type Theme = "light" | "dark"; // <--- MAKE SURE THIS EXACT LINE IS HERE!
+type Theme = "light" | "dark";
 type TabState = "home" | "history" | "referral" | "credits" | "admin" | "approvals" | "leaderboard" | "contact" | "admin_chats" | "users_management";
 
 interface FilterItem {
@@ -66,7 +66,7 @@ export default function DashboardPage() {
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading...", phone: "", email: "" });
   
   const isAdmin = ADMIN_REGS.includes(currentUser.reg.toUpperCase());
-  const primaryAdminReg = ADMIN_REGS[1]; // Falls back to standard master ID string
+  const primaryAdminReg = ADMIN_REGS[1];
 
   const [credits, setCredits] = useState(0);
   const [freeAttempts, setFreeAttempts] = useState(4);
@@ -188,7 +188,7 @@ export default function DashboardPage() {
     return () => { authListener.subscription.unsubscribe(); };
   }, [router]);
 
-useEffect(() => {
+  useEffect(() => {
     async function fetchInitialData() {
       try {
         const cachedFilters = localStorage.getItem('iub_filterOptions');
@@ -197,14 +197,12 @@ useEffect(() => {
         const cachedStats = localStorage.getItem('iub_adminStats');
         if (cachedStats && isAdmin) setAdminStats(JSON.parse(cachedStats));
 
-        // Optimized token validation lookup chain
         let userEmail: string | undefined;
         
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.email) {
           userEmail = session.user.email;
         } else {
-          // Hard fallback verification check if token cache is fresh but unread
           const { data: { user }, error: authError } = await supabase.auth.getUser();
           if (!authError && user?.email) {
             userEmail = user.email;
@@ -304,7 +302,7 @@ useEffect(() => {
     
     fetchInitialData();
   }, [router]);
-  // REALTIME CHAT HANDLER
+
   useEffect(() => {
     if (!currentUser.reg) return;
 
@@ -455,7 +453,7 @@ useEffect(() => {
       if (page === 1) localStorage.setItem('iub_historyLogs', JSON.stringify(newLogs));
     } catch (err) {
       console.error("Failed to load history", err);
-    } finally { // <--- Fixed to "finally"
+    } finally {
       setCreditsTabLoading(false);
     }
   };
@@ -493,7 +491,7 @@ useEffect(() => {
     }
   };
 
-const handleAdminReject = async (paymentId: string) => {
+  const handleAdminReject = async (paymentId: string) => {
     if (window.confirm("Are you sure you want to reject this request?")) {
         try {
             const { error } = await supabase
@@ -921,7 +919,7 @@ const handleAdminReject = async (paymentId: string) => {
     return `${semesterType} ${year}`;
   };
 
- const handleExpandResult = async (reg: string, studentId: number, forcePro = false) => {
+  const handleExpandResult = async (reg: string, studentId: number, forcePro = false) => {
     if (expandedReg === reg && !forcePro) {
       setExpandedReg(null);
       return;
@@ -937,7 +935,6 @@ const handleAdminReject = async (paymentId: string) => {
         return;
       }
 
-      // Force string stabilization to clear out random casing or trailing whitespaces
       const normalizedReg = currentUser.reg.toUpperCase().trim();
 
       if (isPro) {
@@ -954,7 +951,7 @@ const handleAdminReject = async (paymentId: string) => {
         } catch (err) {
           console.error("Deduction backend validation exception:", err);
           showToast("Transaction Failed", "Could not verify search tokens safely. Please retry.", "error");
-          return; // Halts execution to protect your business logic from database exploits
+          return;
         }
       } else {
         try {
@@ -1080,14 +1077,6 @@ const handleAdminReject = async (paymentId: string) => {
     }
   };
 
-  const executeReSearch = (query: string) => {
-    setActiveTab("home");
-    const mode = (query.length >= 8 && query.match(/[0-9]/)) ? "Roll Number" : "Name";
-    setSearchMode(mode);
-    setSearchQuery(query);
-    handleSearch(undefined, 0, query, mode);
-  };
-
   const packages = [
     { id: 'pkg1', price: 'Rs 500', amount: 500, credits: '10,000', label: 'Solo Student' },
     { id: 'pkg2', price: 'Rs 1000', amount: 1000, credits: '25,000', label: 'Friends Plan', pop: true },
@@ -1114,41 +1103,41 @@ const handleAdminReject = async (paymentId: string) => {
     }
 
     try {
-          await supabase.from("payments_record").insert({
-            user_reg: currentUser.reg.toUpperCase(),
-            package_id: paymentForm.package,
-            amount: finalAmount,
-            account_name: paymentForm.name,
-            tid_number: paymentForm.tid
-          });
-          showToast("Success", "Payment submitted for approval!", "info");
-          setIsPaymentSubmitted(true); 
-          loadCreditsHistory(1);
-        } catch(e) {
-          showToast("Error", "Submission failed", "error");
-        }
-      };
+      await supabase.from("payments_record").insert({
+        user_reg: currentUser.reg.toUpperCase(),
+        package_id: paymentForm.package,
+        amount: finalAmount,
+        account_name: paymentForm.name,
+        tid_number: paymentForm.tid
+      });
+      showToast("Success", "Payment submitted for approval!", "info");
+      setIsPaymentSubmitted(true); 
+      loadCreditsHistory(1);
+    } catch(e) {
+      showToast("Error", "Submission failed", "error");
+    }
+  };
+
+  const shareToWhatsApp = () => {
+    const selectedPkg = packages.find(p => p.id === paymentForm.package);
+    const finalAmount = paymentForm.package === 'custom' ? paymentForm.amount : selectedPkg?.amount;
     
-      const shareToWhatsApp = () => {
-        const selectedPkg = packages.find(p => p.id === paymentForm.package);
-        const finalAmount = paymentForm.package === 'custom' ? paymentForm.amount : selectedPkg?.amount;
-        
-        if (!paymentForm.name || !paymentForm.tid || !finalAmount) {
-          return showToast("Missing Data", "Fill out Name, TID, and Amount before sharing.", "error");
-        }
-    
-        const message = `Hello Admin, I have submitted a deposit confirmation request.%0A%0A` +
-                        `*Registration:* ${currentUser.reg}%0A` +
-                        `*Name:* ${paymentForm.name}%0A` +
-                        `*Amount:* Rs. ${finalAmount}%0A` +
-                        `*TID Number:* ${paymentForm.tid}%0A%0A` +
-                        `Please verify and approve my account credits. Thanks!`;
-                        
-        window.open(`https://wa.me/923119277832?text=${message}`, '_blank');
-      };
-    
-      return (
-          <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden text-[13px] sm:text-sm`}>      
+    if (!paymentForm.name || !paymentForm.tid || !finalAmount) {
+      return showToast("Missing Data", "Fill out Name, TID, and Amount before sharing.", "error");
+    }
+
+    const message = `Hello Admin, I have submitted a deposit confirmation request.%0A%0A` +
+                    `*Registration:* ${currentUser.reg}%0A` +
+                    `*Name:* ${paymentForm.name}%0A` +
+                    `*Amount:* Rs. ${finalAmount}%0A` +
+                    `*TID Number:* ${paymentForm.tid}%0A%0A` +
+                    `Please verify and approve my account credits. Thanks!`;
+                    
+    window.open(`https://wa.me/923119277832?text=${message}`, '_blank');
+  };
+
+  return (
+    <div className={`flex flex-col min-h-screen ${t.bg} ${t.text} font-sans transition-colors duration-300 overflow-x-hidden text-[13px] sm:text-sm`}>      
       <AnimatePresence>
         {toastMsg && (
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
@@ -1202,7 +1191,7 @@ const handleAdminReject = async (paymentId: string) => {
 
               <button 
                 onClick={() => setActiveTab("credits")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d] hover:bg-[#002a70]'} transition-all text-xs font-bold`}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${t.border} ${theme==='light'?'bg-white hover:bg-slate-50 shadow-sm':'bg-[#001c4d]' hover:bg-[#002a70]'} transition-all text-xs font-bold`}
               >
                 <Wallet size={14} className={t.primary} />
                 <span>{credits.toLocaleString()}</span>
@@ -1231,7 +1220,7 @@ const handleAdminReject = async (paymentId: string) => {
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
             <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.3 }}
-              className={`fixed top-0 left-0 h-full w-64 ${theme==='light' ? 'bg-white' : 'bg-[#00173d]'}' border-r ${t.border} z-50 flex flex-col shadow-2xl`}
+              className={`fixed top-0 left-0 h-full w-64 ${theme==='light' ? 'bg-white' : 'bg-[#00173d]'} border-r ${t.border} z-50 flex flex-col shadow-2xl`}
             >
               <div className="p-5 border-b border-slate-500/10 flex justify-between items-center">
                 <div className="flex items-center gap-3">
@@ -1797,7 +1786,7 @@ const handleAdminReject = async (paymentId: string) => {
                                             <th className="px-2 py-2 text-center font-bold">Pr.F</th>
                                             <th className="px-2 py-2 text-center font-bold">Tot</th>
                                           </tr>
-                                        </thead>
+                                         anisotropy                 </thead>
                                         <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                                           {sem.courses.map((course: any, cIdx: number) => (
                                             <tr key={cIdx} className={t.rowHover}>
@@ -1884,7 +1873,7 @@ const handleAdminReject = async (paymentId: string) => {
               <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><TrendingUp size={20}/> Top-up Plans</h3>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {packages.map(pkg => (
-                  <div key={pkg.id} onClick={() => setPaymentForm({ ...paymentForm, package: pkg.id })}
+                  <div key={pkg.id} onClick={() => { setPaymentForm({ ...paymentForm, package: pkg.id }); setIsPaymentSubmitted(false); }}
                     className={`cursor-pointer p-4 rounded-xl border-2 transition-all relative overflow-hidden shadow-sm ${paymentForm.package === pkg.id ? "border-amber-500 bg-amber-500/10" : t.border + " " + t.cardBg}`}
                   >
                     {pkg.pop && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-bl-lg shadow-sm">Popular</div>}
@@ -1926,39 +1915,30 @@ const handleAdminReject = async (paymentId: string) => {
                   </div>
                   
                   <div className="flex justify-end items-center pt-2 w-full">
-                      {!isPaymentSubmitted ? (
+                    {!isPaymentSubmitted ? (
+                      <button 
+                        onClick={handlePaymentSubmit} 
+                        className={`w-full sm:w-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}
+                      >
+                        <CheckCircle2 size={18}/> I have Paid!
+                      </button>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-center">
+                        <p className="text-xs font-semibold text-emerald-500 animate-pulse bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-center w-full sm:w-auto">
+                          ✓ Recorded in Ledger!
+                        </p>
                         <button 
-                          onClick={handlePaymentSubmit} 
-                          className={`w-full sm:w-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}
+                          type="button"
+                          onClick={shareToWhatsApp} 
+                          className="w-full sm:w-auto px-7 py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2.5 active:scale-95 transition-all shadow-lg shadow-emerald-500/20 border border-emerald-400/30"
                         >
-                          <CheckCircle2 size={18}/> I have Paid!
+                          <svg width="18" height="18" viewBox="0 0 448 512" fill="currentColor">
+                            <path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/>
+                          </svg>
+                          Share on WhatsApp
                         </button>
-                      ) : (
-                        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-center">
-                          <p className="text-xs font-semibold text-emerald-500 animate-pulse bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-center w-full sm:w-auto">
-                            ✓ Recorded in Ledger!
-                          </p>
-                          <button 
-                            type="button"
-                            onClick={shareToWhatsApp} 
-                            className="w-full sm:w-auto px-7 py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2.5 active:scale-95 transition-all shadow-lg shadow-emerald-500/20 border border-emerald-400/30"
-                          >
-                            <svg width="18" height="18" viewBox="0 0 448 512" fill="currentColor">
-                              <path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/>
-                            </svg>
-                            Share on WhatsApp
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <button 
-                      type="button"
-                      onClick={handlePaymentSubmit} 
-                      className={`w-full sm:w-auto px-8 py-3.5 ${t.btnPrimary} font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md`}
-                    >
-                      <CheckCircle2 size={18}/> I have Paid!
-                    </button>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -2059,7 +2039,7 @@ const handleAdminReject = async (paymentId: string) => {
               <Share2 size={30} />
             </div>
             <h3 className="font-black text-xl mb-2">Invite & Earn Credits</h3>
-            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up, you instantly earn 400 reward credits added to your wallet balance! You can invite upto 4 Students per Day.</p>
+            <p className="opacity-70 mb-6 max-w-md mx-auto">Share your link with classmates. If they sign up, you instantly earn 400 reward credits added to your wallet balance! You can invite up to 4 Students per Day.</p>
             <div className={`max-w-md mx-auto p-2 rounded-xl border ${t.border} bg-slate-500/5 font-mono flex justify-between items-center pl-4 shadow-inner`}>
               <span className="truncate opacity-80 font-semibold text-[12px]">https://iubbackend.vercel.app/ref/{currentUser.reg}</span>
               <button onClick={() => { navigator.clipboard.writeText(`https://iubbackend.vercel.app/ref/${currentUser.reg}`); showToast("Copied!", "Referral link copied to clipboard", "info"); }} className={`${t.btnPrimary} px-5 py-2 rounded-lg font-bold shadow-md active:scale-95 transition-transform`}>Copy</button>
