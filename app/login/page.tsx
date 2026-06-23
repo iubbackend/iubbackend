@@ -187,7 +187,7 @@ function LoginContent() {
     const cleanRollNumber = rollNumber.trim().toUpperCase();
     const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
     if (!regRegex.test(cleanRollNumber)) {
-      setErrorMsg('Invalid Registration Number format. Example: S25BARIN1M01118');
+      setErrorMsg('Invalid Registration Number format. Example: F21BSCS1M01234');
       return;
     }
   
