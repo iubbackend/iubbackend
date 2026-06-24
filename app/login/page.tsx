@@ -658,7 +658,7 @@ function LoginContent() {
               </button>
             )}
             <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">
-              {view === 'login' && 'Welcome Back'}
+              {view === 'login' && 'The Site is under maintenance. Check back in 2 hours.'}
               {view === 'signup' && 'Create Account'}
               {view === 'forgot_password' && 'Reset Password'}
               {view === 'forgot_email' && 'Find Email'}
