@@ -571,7 +571,8 @@ export default function DashboardPage() {
     setHasUnreadMessages(false);
     try {
       const { data } = await supabase.from('messages').select('*')
-        .or(`sender_reg.eq.${currentUser.reg},receiver_reg.eq.${primaryAdminReg}`)
+        // Updated line below to ensure both users are part of the specific message
+        .or(`and(sender_reg.eq.${currentUser.reg},receiver_reg.eq.${primaryAdminReg}),and(sender_reg.eq.${primaryAdminReg},receiver_reg.eq.${currentUser.reg})`)
         .order('created_at', { ascending: true });
       setChatMessages(data || []);
       await supabase.from('messages').update({ is_read: true }).eq('receiver_reg', currentUser.reg).eq('is_read', false);
