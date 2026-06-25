@@ -628,7 +628,7 @@ export default function AdminDashboardPage() {
 
             {/* SEARCH PORTAL CLONE */}
             <div className={`${t.cardBg} border ${t.border} p-4 sm:p-5 rounded-2xl transition-all mt-4`}>
-              <h3 className="font-black text-lg mb-4 flex items-center gap-2 text-emerald-500"><Search size={18}/> Directory Search</h3>
+              <h3 className="font-black text-lg mb-4 flex items-center gap-2 text-emerald-500"><Search size={18}/> Search Results</h3>
               <form onSubmit={(e) => handleSearch(e, 0)} className="flex flex-col gap-3">
                 
                 <div className="flex flex-col items-center mb-1">
@@ -675,7 +675,7 @@ export default function AdminDashboardPage() {
                     />
                   </div>
                   <button type="submit" disabled={isSearching || !searchQuery.trim()} className={`${t.btnPrimary} font-bold text-xs rounded-xl px-6 py-2 flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm`}>
-                    {isSearching ? <div className="h-3 w-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "Search DB"}
+                    {isSearching ? <div className="h-3 w-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "Search"}
                   </button>
                 </div>
               </form>
