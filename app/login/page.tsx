@@ -231,13 +231,13 @@ function LoginContent() {
         localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
         setSuccessMsg('Login successful! Welcome back.');
         
-        // --- ADD THIS ADMIN CHECK ---
         const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
         if (ADMIN_REGS.includes(cleanRollNumber)) {
           router.push('/backstage');
         } else {
           router.push('/dashboard');
         }
+      }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
     } finally {
@@ -245,7 +245,6 @@ function LoginContent() {
     }
   };
 
-  // Nwe Verification Step for Signup
   const handleVerifyRoll = async () => {
     clearMessages();
     const cleanRoll = rollNumber.trim().toUpperCase();
@@ -386,10 +385,8 @@ function LoginContent() {
         return;
       }
 
-// 2. Safe profile injection post-verification success checkpoint
       const hashedPassword = await hashPassword(password);
       
-      // First, check if the record already managed to get into the database
       const { data: existingRecord } = await supabase
         .from('users')
         .select('reg')
@@ -399,14 +396,12 @@ function LoginContent() {
       let dbError = null;
 
       if (existingRecord) {
-        // If it exists (due to a trigger or previous test), safely update it with the verified info
         const { error: updateError } = await supabase
           .from('users')
           .update({ phone: rawNumber, pass: hashedPassword, email: cleanEmail, reg: cleanRoll })
           .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`);
         dbError = updateError;
       } else {
-        // If it's completely new, insert it
         const { error: insertError } = await supabase
           .from('users')
           .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
@@ -415,7 +410,6 @@ function LoginContent() {
 
       if (dbError) {
         setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
-        console.error("DB Sync Error:", dbError);
         setIsLoading(false);
         return;
       }
@@ -441,7 +435,6 @@ function LoginContent() {
       setSuccessMsg('Email verified successfully! Welcome to the portal.');
       
       setTimeout(() => {
-        // --- ADD THIS ADMIN CHECK ---
         const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
         if (ADMIN_REGS.includes(cleanRoll)) {
           window.location.href = '/backstage';
