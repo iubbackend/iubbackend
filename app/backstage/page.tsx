@@ -535,7 +535,9 @@ export default function AdminDashboardPage() {
           <button onClick={() => setSidebarOpen(true)} className={`p-1.5 rounded-lg border ${t.border} hover:bg-black/5`}>
             <Menu size={20} className={t.primary} />
           </button>
-          <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => router.push('/')}>
+          
+          {/* CHANGED: Now sets active tab to home instead of pushing route to '/' */}
+          <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setActiveTab('home')}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className={t.primary}>
               <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="fill-current opacity-20"/>
               <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
