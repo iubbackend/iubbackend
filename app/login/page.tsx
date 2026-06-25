@@ -230,8 +230,14 @@ function LoginContent() {
         
         localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
         setSuccessMsg('Login successful! Welcome back.');
-        router.push('/dashboard');
-      }
+        
+        // --- ADD THIS ADMIN CHECK ---
+        const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
+        if (ADMIN_REGS.includes(cleanRollNumber)) {
+          router.push('/backstage');
+        } else {
+          router.push('/dashboard');
+        }
     } catch (err) {
       setErrorMsg('An unexpected error occurred.');
     } finally {
@@ -435,7 +441,13 @@ function LoginContent() {
       setSuccessMsg('Email verified successfully! Welcome to the portal.');
       
       setTimeout(() => {
-        window.location.href = '/dashboard';
+        // --- ADD THIS ADMIN CHECK ---
+        const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
+        if (ADMIN_REGS.includes(cleanRoll)) {
+          window.location.href = '/backstage';
+        } else {
+          window.location.href = '/dashboard';
+        }
       }, 1500);
     } catch (err) {
       setErrorMsg('An unexpected execution error occurred.');
