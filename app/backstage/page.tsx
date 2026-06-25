@@ -7,7 +7,7 @@ import {
   Sun, Moon, ChevronDown, Lock,
   Menu, CreditCard, History, Share2, Wallet,
   CheckCircle2, X, GraduationCap, Activity, TrendingUp, AlertCircle,
-  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, ArrowLeft, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send, Phone, ArrowUpRight, Info, User
+  ShieldAlert, DollarSign, UsersRound, Crown, ArrowRight, ArrowLeft, MessageSquare, Check, CheckCheck, Edit2, Trash2, Send, Phone, ArrowUpRight, Info, User, UserCog
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from '@supabase/ssr';
