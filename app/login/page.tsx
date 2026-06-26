@@ -786,9 +786,10 @@ function LoginContent() {
             </form>
           )}
 
-          {/* VIEW 2: SIGN UP */}
+{/* VIEW 2: SIGN UP */}
           {view === 'signup' && (
             <form onSubmit={handleSignup} className="space-y-4">
+              {/* STEP 1: ROLL NUMBER ENTRY */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Roll Number</label>
                 <div className="relative">
@@ -810,7 +811,7 @@ function LoginContent() {
                 </div>
               </div>
 
-             {!isRollVerified ? (
+              {!isRollVerified ? (
                 <button 
                   type="button" 
                   onClick={handleVerifyRoll} 
@@ -820,6 +821,7 @@ function LoginContent() {
                   {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify Roll Number'}
                 </button>
               ) : !isNameVerified ? (
+                /* STEP 2: NAME VERIFICATION OVERLAY SCREEN */
                 <>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Your Name</label>
@@ -846,6 +848,7 @@ function LoginContent() {
                   </button>
                 </>
               ) : (
+                /* STEP 3: FINAL PROFILE CONFIGURATION ACCOUNTS DETAILS */
                 <>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
@@ -882,56 +885,8 @@ function LoginContent() {
                   </button>
                 </>
               )}
-                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                        <User size={18} />
-                      </div>
-                      <input 
-                        type="text" 
-                        value={studentName} 
-                        onChange={(e) => setStudentName(e.target.value)} 
-                        placeholder="e.g. Muhammad Abu Bakar" 
-                        required 
-                        className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" 
-                      />
-                    </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                        <Phone size={18} />
-                      </div>
-                      <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Email Address</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                        <Mail size={18} />
-                      </div>
-                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. student@gmail.com" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Password</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                        <Lock size={18} />
-                      </div>
-                      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
-                    </div>
-                  </div>
-
-                  <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 hover:bg-green-700 font-black px-4 py-3 text-sm text-white shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
-                    {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Complete Registration'}
-                  </button>
-                </>
-              )}
-
+              {/* NAVIGATION FOOTER */}
               <div className="pt-4 border-t border-gray-200 dark:border-[#00348c]/30 text-center">
                 <button type="button" onClick={() => switchView('login')} className="text-xs font-bold text-blue-600 dark:text-amber-400 hover:underline">
                   Already registered? Return to Login
@@ -939,7 +894,6 @@ function LoginContent() {
               </div>
             </form>
           )}
-
           {/* VIEW 3: FORGOT PASSWORD */}
           {view === 'forgot_password' && (
             <form onSubmit={handleForgotPassword} className="space-y-5">
