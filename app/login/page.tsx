@@ -193,70 +193,73 @@ function LoginContent() {
   };
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-  
-    const cleanRollNumber = rollNumber.trim().toUpperCase();
-    const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
-    if (!regRegex.test(cleanRollNumber)) {
-      setErrorMsg('Invalid Registration Number format. Example: F21BSCS1M01234');
-      return;
-    }
-  
-    setIsLoading(true);
-    const supabase = getSupabase();
+      e.preventDefault();
+      clearMessages();
     
-    try {
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('email')
-        .ilike('reg', cleanRollNumber)
-        .maybeSingle();
-  
-      if (userError || !userData) {
-        setErrorMsg('Invalid Roll Number or Password.');
-        setIsLoading(false);
+      const cleanRollNumber = rollNumber.trim().toUpperCase();
+      const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
+      if (!regRegex.test(cleanRollNumber)) {
+        setErrorMsg('Invalid Registration Number format. Example: F21BSCS1M01234');
         return;
       }
-  
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: userData.email.toLowerCase().trim(), 
-        password: password, 
-      });
-  
-      if (authError) {
-        setErrorMsg('Invalid Roll Number or Password.');
-      } else {
-        const { data: profile } = await supabase
+    
+      setIsLoading(true);
+      const supabase = getSupabase();
+    
+      try {
+        const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('reg, phone, email')
+          .select('email')
           .ilike('reg', cleanRollNumber)
           .maybeSingle();
-  
-        const userState = { 
-          reg: profile?.reg.toUpperCase() || cleanRollNumber, 
-          name: "Student", 
-          phone: profile?.phone || "", 
-          email: userData.email 
-        };
-        
-        localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
-        setSuccessMsg('Login successful! Welcome back.');
-        
-        const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
-        if (ADMIN_REGS.includes(cleanRollNumber)) {
-          router.push('/backstage');
-        } else {
-          router.push('/dashboard');
+    
+        if (userError || !userData) {
+          setErrorMsg('Invalid Roll Number or Password.');
+          setIsLoading(false);
+          return;
         }
+    
+        // CAPTURE AUTH DATA HERE TO CHECK THE ADMIN BADGE LATER
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: userData.email.toLowerCase().trim(), 
+          password: password, 
+        });
+    
+        if (authError) {
+          setErrorMsg('Invalid Roll Number or Password.');
+        } else {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('reg, phone, email')
+            .ilike('reg', cleanRollNumber)
+            .maybeSingle();
+    
+          const userState = { 
+            reg: profile?.reg.toUpperCase() || cleanRollNumber, 
+            name: "Student", 
+            phone: profile?.phone || "", 
+            email: userData.email 
+          };
+          
+          localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
+          setSuccessMsg('Login successful! Welcome back.');
+          
+          // NEW SECURE CHECK: Look at the internal app_metadata badge
+          const isAdmin = authData?.user?.app_metadata?.role === 'admin';
+    
+          if (isAdmin) {
+            router.push('/backstage');
+          } else {
+            router.push('/dashboard');
+          }
+        }
+      } catch (err) {
+        setErrorMsg('An unexpected error occurred.');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      setErrorMsg('An unexpected error occurred.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+    };
+  
   const handleVerifyRoll = async () => {
     clearMessages();
     const cleanRoll = rollNumber.trim().toUpperCase();
