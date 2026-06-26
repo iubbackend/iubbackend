@@ -84,21 +84,32 @@ export default function AdminDashboardPage() {
 
     async function verifyAdmin() {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return forceLogout();
-
-      const { data: userRecord } = await supabase.from("users").select("reg, phone, email").ilike("email", session.user.email!).maybeSingle();
       
-      if (!userRecord || userRecord.reg.toUpperCase() !== PRIMARY_ADMIN_REG) {
-        router.push('/dashboard'); 
-        return;
+      // SECURE CHECK: Kick them out if there's no session OR if they lack the 'admin' badge
+      if (!session || session.user.app_metadata?.role !== 'admin') {
+        return forceLogout();
       }
+
+      // If they pass the secure check, fetch their profile data for the UI
+      const { data: userRecord } = await supabase
+        .from("users")
+        .select("reg, phone, email")
+        .ilike("email", session.user.email!)
+        .maybeSingle();
       
-      setCurrentUser({ reg: userRecord.reg.toUpperCase(), name: "System Admin", phone: userRecord.phone, email: userRecord.email });
+      setCurrentUser({ 
+        reg: userRecord?.reg.toUpperCase() || "ADMIN", 
+        name: "System Admin", 
+        phone: userRecord?.phone || "", 
+        email: session.user.email! 
+      });
+      
       loadFilters();
       loadRealAdminData();
       loadAdminChatList();
       loadAllUsers();
     }
+    
     verifyAdmin();
   }, []);
 
