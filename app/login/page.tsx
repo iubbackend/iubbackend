@@ -79,10 +79,21 @@ function LoginContent() {
   const [otpToken, setOtpToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   
+ // --- EMAIL NORMALIZATION HELPER ---
+  const normalizeEmail = (rawEmail: string) => {
+    let e = rawEmail.toLowerCase().trim();
+    if (e.endsWith('@gmail.com')) {
+      const [local, domain] = e.split('@');
+      e = local.replace(/\./g, '') + '@' + domain;
+    }
+    return e;
+  };
+
   // New States for verification and visibility
   const [showPassword, setShowPassword] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [isRollVerified, setIsRollVerified] = useState(false);
+  const [isNameVerified, setIsNameVerified] = useState(false);
   const [dbStudentName, setDbStudentName] = useState('');
   
   // UI & Timeout States
@@ -167,6 +178,7 @@ function LoginContent() {
   const switchView = (newView: ViewState) => {
     setView(newView);
     setIsRollVerified(false);
+    setIsNameVerified(false);
     setStudentName('');
     setShowPassword(false);
     clearMessages();
@@ -290,17 +302,24 @@ function LoginContent() {
       setIsLoading(false);
     }
   };
+
+  const handleVerifyName = () => {
+    clearMessages();
+    if (!isNameMatch(studentName, dbStudentName)) {
+      setErrorMsg('Your name does not match our records for this Registration Number.');
+      return;
+    }
+    setIsNameVerified(true);
+    setSuccessMsg('Identity verified. Please provide your contact details.');
+  };
   
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
 
-    if (!isNameMatch(studentName, dbStudentName)) {
-      setErrorMsg('Your name is not matching with your reg or this is not your Reg');
-      return;
-    }
+    // The name check is now handled in the previous step.
   
-    const cleanEmail = email.toLowerCase().trim();
+    const cleanEmail = normalizeEmail(email);
     const cleanRoll = rollNumber.trim().toUpperCase();
     const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
     
@@ -791,7 +810,7 @@ function LoginContent() {
                 </div>
               </div>
 
-              {!isRollVerified ? (
+             {!isRollVerified ? (
                 <button 
                   type="button" 
                   onClick={handleVerifyRoll} 
@@ -800,11 +819,69 @@ function LoginContent() {
                 >
                   {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Verify Roll Number'}
                 </button>
-              ) : (
+              ) : !isNameVerified ? (
                 <>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Your Name</label>
                     <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <User size={18} />
+                      </div>
+                      <input 
+                        type="text" 
+                        value={studentName} 
+                        onChange={(e) => setStudentName(e.target.value)} 
+                        placeholder="e.g. Muhammad Abu Bakar" 
+                        required 
+                        className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" 
+                      />
+                    </div>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={handleVerifyName} 
+                    className="mt-2 flex w-full items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-amber-500 dark:hover:bg-amber-600 font-black px-4 py-3 text-sm text-white dark:text-[#00122a] shadow-md transition-all uppercase tracking-wider"
+                  >
+                    Confirm Name
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Phone Number</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Phone size={18} />
+                      </div>
+                      <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Email Address</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Mail size={18} />
+                      </div>
+                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. student@gmail.com" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-1.5">Password</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
+                        <Lock size={18} />
+                      </div>
+                      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create Password" required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                    </div>
+                  </div>
+
+                  <button type="submit" disabled={isLoading} className="mt-2 flex w-full items-center justify-center rounded-xl bg-green-600 hover:bg-green-700 font-black px-4 py-3 text-sm text-white shadow-md disabled:opacity-70 transition-all uppercase tracking-wider">
+                    {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Complete Registration'}
+                  </button>
+                </>
+              )}
                       <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
                         <User size={18} />
                       </div>
