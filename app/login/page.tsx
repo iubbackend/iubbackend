@@ -251,7 +251,7 @@ function LoginContent() {
     
     const regRegex = /^[FS]\d{2}[A-Z]+[0-9][ME][0-9]+$/;
     if (!regRegex.test(cleanRoll)) {
-      setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S25BARIN1M01118');
+      setErrorMsg('Registration Number contains spaces, special characters, or is invalid. Format: S21BSCS1M01234');
       return;
     }
 
