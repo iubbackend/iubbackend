@@ -455,7 +455,13 @@ export default function AdminDashboardPage() {
     } catch (e: any) {
        // Fallback if RPC fails/disabled
        await supabase.from('payments_record').update({ status: 'approved' }).eq('id', paymentId);
-       let calcCredits = amount >= 500 ? 10000 : amount * 20;
+       
+       let calcCredits = 0;
+       if (amount === 5000) calcCredits = 125000;
+       else if (amount === 1000) calcCredits = 17000;
+       else if (amount === 500) calcCredits = 7500;
+       else calcCredits = amount * 15;
+
        const { data: existing } = await supabase.from('user_credits').select('credits').eq('user_reg', reg).maybeSingle();
        if (existing) {
            await supabase.from('user_credits').update({ credits: existing.credits + calcCredits }).eq('user_reg', reg);
@@ -485,7 +491,13 @@ export default function AdminDashboardPage() {
         }).select().single();
         if(pending) await handleAdminApprove(pending.id, pending.user_reg, pending.amount);
     } else {
-        let calcCredits = Number(manualPay.amount) >= 500 ? 10000 : Number(manualPay.amount) * 20;
+        let calcCredits = 0;
+        const numAmount = Number(manualPay.amount);
+        if (numAmount === 5000) calcCredits = 125000;
+        else if (numAmount === 1000) calcCredits = 17000;
+        else if (numAmount === 500) calcCredits = 7500;
+        else calcCredits = numAmount * 15;
+
         const { data: existing } = await supabase.from('user_credits').select('credits').eq('user_reg', cleanReg).maybeSingle();
         if (existing) {
             await supabase.from('user_credits').update({ credits: existing.credits + calcCredits }).eq('user_reg', cleanReg);
