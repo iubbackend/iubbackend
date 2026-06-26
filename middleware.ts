@@ -28,20 +28,35 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // 2. Safely extract user authentication status
+  // 2. Safely extract user authentication status and metadata
   const { data: { user } } = await supabase.auth.getUser()
 
-  // 3. PROTECT ROUTE: If not logged in and accessing dashboard -> Redirect to login
-  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
+  // 3. PROTECT DASHBOARD & BACKSTAGE: If not logged in -> Redirect to login
+  if (!user && (request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/backstage'))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // 4. PREVENT DOUBLE LOGIN: If logged in and accessing login page -> Redirect to dashboard
+  // 4. THE BOUNCER (ADMIN ONLY): If logged in but lacks admin badge -> Redirect to dashboard
+  if (user && request.nextUrl.pathname.startsWith('/backstage')) {
+    const isAdmin = user.app_metadata?.role === 'admin'
+    
+    if (!isAdmin) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
+  }
+
+  // 5. PREVENT DOUBLE LOGIN: If logged in and accessing login page -> Route appropriately
   if (user && request.nextUrl.pathname.startsWith('/login')) {
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
+    const isAdmin = user.app_metadata?.role === 'admin'
+    
+    // Route admins to backstage, students to dashboard
+    url.pathname = isAdmin ? '/backstage' : '/dashboard'
+    
     const redirectResponse = NextResponse.redirect(url)
     
     // Copy active session cookies over to the redirect response object
@@ -57,5 +72,5 @@ export async function middleware(request: NextRequest) {
 
 // Specify exactly which paths should trigger this authentication check
 export const config = {
-  matcher: ['/dashboard/:path*', '/login'],
+  matcher: ['/dashboard/:path*', '/backstage/:path*', '/login'],
 }
