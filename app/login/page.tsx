@@ -457,7 +457,7 @@ function LoginContent() {
       setSuccessMsg('Email verified successfully! Welcome to the portal.');
       
       setTimeout(() => {
-        const ADMIN_REGS = ["S25BARIN1M01000", "S20BSCS1M01001"];
+        const ADMIN_REGS = ["S20BSCS1M01001"];
         if (ADMIN_REGS.includes(cleanRoll)) {
           window.location.href = '/backstage';
         } else {
