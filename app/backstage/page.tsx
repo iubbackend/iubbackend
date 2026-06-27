@@ -117,6 +117,40 @@ export default function AdminDashboardPage() {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatFeed]);
 
+  // === REAL-TIME CHAT SUBSCRIPTION ===
+  // 1. Keep track of the currently open chat so the live-listener knows who we are talking to
+  const activeChatRef = useRef(activeAdminChatUser);
+  useEffect(() => { activeChatRef.current = activeAdminChatUser; }, [activeAdminChatUser]);
+
+  // 2. Listen to the database live for incoming messages
+  useEffect(() => {
+    const channel = supabase.channel('admin_messages_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+         const newMsg = payload.new;
+         const currentActive = activeChatRef.current;
+         
+         // Only trigger if the message involves the admin
+         if (newMsg.receiver_reg === PRIMARY_ADMIN_REG || newMsg.sender_reg === PRIMARY_ADMIN_REG) {
+             // Refresh the global chat list (Updates unread counters and bumps recent chats)
+             loadAdminChatList();
+             
+             // If the admin is actively viewing this specific conversation, refresh the feed
+             if (currentActive && (currentActive.reg === newMsg.sender_reg || currentActive.reg === newMsg.receiver_reg)) {
+                 loadAdminSingleChat(currentActive.reg, currentActive.name);
+             }
+         }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
+          // If a message updates (like a read receipt), refresh the UI
+          loadAdminChatList();
+          const currentActive = activeChatRef.current;
+          if (currentActive) loadAdminSingleChat(currentActive.reg, currentActive.name);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const toggleTheme = () => {
     const newTheme = theme === "light" ? "dark" : "light";
     setTheme(newTheme);
