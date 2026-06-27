@@ -666,7 +666,6 @@ export default function UserDashboardPage() {
     const isPro = forcePro || isProMode;
     const isUnlocked = unlockedRegs.has(reg);
 
-    // Initial basic check so we don't spam the server if they are clearly broke
     if (!isUnlocked && !isPro && freeAttempts <= 0) {
       showToast("Out of Attempts", "Redirecting to wallet to top up.", "error");
       setActiveTab('credits');
@@ -676,8 +675,7 @@ export default function UserDashboardPage() {
     setExpandedReg(reg);
 
     try {
-      // 1. ONE SECURE CALL: The server deducts the balance AND fetches the data simultaneously
-      // Because we pass the data back as JSON, it perfectly mimics the old Supabase .select() response
+      // 1. ONE SECURE CALL: The server deducts the balance AND fetches the data
       const { data: records, error } = await supabase.rpc('unlock_and_fetch_results', { 
         p_student_id: studentId, 
         p_is_pro: isPro 
@@ -690,13 +688,15 @@ export default function UserDashboardPage() {
         return;
       }
 
-      // 2. Update Local UI State
+      // 2. Update Local UI State & Log Search safely
       if (!isUnlocked) {
         setUnlockedRegs(prev => new Set(prev).add(reg));
         if (isPro) {
           setCredits(p => Math.max(0, p - SEARCH_COST));
+          logSearch(`Target Student ID: ${studentId}`, "Paid Search");
         } else {
           setFreeAttempts(p => Math.max(0, p - 1));
+          logSearch(`Target Student ID: ${studentId}`, "Free Search");
         }
       }
 
@@ -705,7 +705,7 @@ export default function UserDashboardPage() {
         return;
       }
 
-      // 3. Process the data for the UI (Exactly the same as before)
+      // 3. Process the data for the UI
       const studentCard = searchResults?.find(s => s.id === studentId);
       const rawSection = studentCard?.section || "General Data";
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
