@@ -666,70 +666,46 @@ export default function UserDashboardPage() {
     const isPro = forcePro || isProMode;
     const isUnlocked = unlockedRegs.has(reg);
 
-    if (!isUnlocked) {
-      if (!isPro && freeAttempts <= 0) {
-        showToast("Out of Attempts", "Redirecting to wallet to top up.", "error");
-        setActiveTab('credits');
-        return;
-      }
-
-      const normalizedReg = currentUser.reg;
-
-      if (isPro) {
-        try {
-          const { error: rpcError } = await supabase.rpc('deduct_credits', { 
-            p_user_reg: normalizedReg, 
-            p_cost: SEARCH_COST 
-          });
-          
-          if (rpcError) throw rpcError;
-
-          setCredits(p => Math.max(0, p - SEARCH_COST));
-          logSearch(reg, "Paid Search");
-        } catch (err) {
-          console.error("Deduction backend validation exception:", err);
-          showToast("Transaction Failed", "Could not verify search tokens safely. Please retry.", "error");
-          return;
-        }
-      } else {
-        try {
-          const { error: rpcError } = await supabase.rpc('deduct_free_attempt', { 
-            p_user_reg: normalizedReg 
-          });
-          
-          if (rpcError) throw rpcError;
-
-          setFreeAttempts(p => Math.max(0, p - 1));
-          logSearch(reg, "Free Search");
-        } catch (err) {
-          console.error("Free track counter mutation error:", err);
-          showToast("Sync Error", "Could not update free validation attempts.", "error");
-          return;
-        }
-      }
-
-      setUnlockedRegs(prev => {
-        const nextSet = new Set(prev);
-        nextSet.add(reg);
-        return nextSet;
-      });
+    // Initial basic check so we don't spam the server if they are clearly broke
+    if (!isUnlocked && !isPro && freeAttempts <= 0) {
+      showToast("Out of Attempts", "Redirecting to wallet to top up.", "error");
+      setActiveTab('credits');
+      return;
     }
 
     setExpandedReg(reg);
 
     try {
-      const columns = isPro
-        ? "id, sessional_marks, mid_term_marks, end_term_marks, practical_sessional_marks, practical_final_marks, total_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester"
-        : "id, mid_term_marks, subject_id (course_code, course_name, credit_hours), semester_num, semester";
+      // 1. ONE SECURE CALL: The server deducts the balance AND fetches the data simultaneously
+      // Because we pass the data back as JSON, it perfectly mimics the old Supabase .select() response
+      const { data: records, error } = await supabase.rpc('unlock_and_fetch_results', { 
+        p_student_id: studentId, 
+        p_is_pro: isPro 
+      });
 
-      const { data: records, error } = await supabase.from("results").select(columns).eq("student_id", studentId); 
-      if (error) throw error;
+      if (error) {
+        console.error("Secure fetch failed:", error);
+        showToast("Access Denied", "Could not verify search tokens safely. Please retry.", "error");
+        setExpandedReg(null);
+        return;
+      }
+
+      // 2. Update Local UI State
+      if (!isUnlocked) {
+        setUnlockedRegs(prev => new Set(prev).add(reg));
+        if (isPro) {
+          setCredits(p => Math.max(0, p - SEARCH_COST));
+        } else {
+          setFreeAttempts(p => Math.max(0, p - 1));
+        }
+      }
 
       if (!records || records.length === 0) {
         setStudentDetails([]);
         return;
       }
 
+      // 3. Process the data for the UI (Exactly the same as before)
       const studentCard = searchResults?.find(s => s.id === studentId);
       const rawSection = studentCard?.section || "General Data";
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
@@ -751,7 +727,6 @@ export default function UserDashboardPage() {
 
       const grouped = Array.from(uniqueCourses.values()).reduce((acc: any, rec: any) => {
         const sem = rec.semester || calculatedSemester;
-        
         if (!acc[sem]) acc[sem] = [];
         
         const totalMarks = isPro ? roundMark(rec.total_marks) : null;
@@ -780,10 +755,7 @@ export default function UserDashboardPage() {
         return numB - numA; 
       }).map(sem => {
         const courses = grouped[sem];
-        let totalQualityPoints = 0;
-        let totalCr = 0;
-        let semTotalMarks = 0;
-        let semMaxMarks = 0;
+        let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
         let canCalculate = isPro;
 
         courses.forEach((c: any) => {
@@ -811,6 +783,7 @@ export default function UserDashboardPage() {
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
+      console.error(err);
       setStudentDetails([]);
     }
   };
