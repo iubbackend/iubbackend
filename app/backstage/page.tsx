@@ -394,34 +394,6 @@ export default function AdminDashboardPage() {
     setAllUsersList(data || []);
   };
 
-  // === CHAT SYSTEM ===
-  const loadAdminChatList = async () => {
-    const { data, error } = await supabase.rpc('get_admin_chat_list');
-    if (!error && data) {
-      // Fetch latest message for each to get the read receipt status
-      const regs = data.map((d:any) => d.reg);
-      const { data: latestMsgs } = await supabase.from('messages')
-        .select('sender_reg, receiver_reg, content, is_read, is_delivered, created_at')
-        .or(`receiver_reg.eq.${PRIMARY_ADMIN_REG},sender_reg.eq.${PRIMARY_ADMIN_REG}`)
-        .order('created_at', { ascending: false });
-
-      const enrichedList = data.map((chat: any) => {
-         const lastMsg = latestMsgs?.find(m => 
-            (m.sender_reg === chat.reg && m.receiver_reg === PRIMARY_ADMIN_REG) || 
-            (m.sender_reg === PRIMARY_ADMIN_REG && m.receiver_reg === chat.reg)
-         );
-         return {
-             ...chat,
-             last_msg_content: lastMsg ? lastMsg.content : "No messages",
-             last_msg_is_me: lastMsg?.sender_reg === PRIMARY_ADMIN_REG,
-             last_msg_is_read: lastMsg?.is_read,
-             last_msg_is_delivered: lastMsg?.is_delivered
-         };
-      });
-      setAdminChatList(enrichedList);
-    }
-  };
-
   const loadAdminChatList = async () => {
     const { data, error } = await supabase.rpc('get_admin_chat_list');
     if (!error && data && data.length > 0) {
