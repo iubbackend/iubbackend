@@ -394,6 +394,67 @@ export default function AdminDashboardPage() {
     setAllUsersList(data || []);
   };
 
+  const handleChatSearch = async (val: string) => {
+      setChatSearchQuery(val);
+      if (!val.trim()) {
+          setChatSearchResults([]);
+          return;
+      }
+      
+      try {
+        // 1. Fetch from registered users first
+        const { data: registeredUsers, error } = await supabase
+          .from('users')
+          .select('reg, email')
+          .or(`reg.ilike.%${val}%,email.ilike.%${val}%`)
+          .limit(10);
+
+        if (error) throw error;
+
+        if (!registeredUsers || registeredUsers.length === 0) {
+          // Fallback: Check name records in students, then verify if they have a user account
+          const { data: studentMatch } = await supabase
+            .from('students')
+            .select('reg, name')
+            .ilike('name', `%${val}%`)
+            .limit(5);
+
+          if (studentMatch && studentMatch.length > 0) {
+            const matches = studentMatch.map(s => s.reg);
+            const { data: userFallback } = await supabase.from('users').select('reg, email').in('reg', matches);
+            
+            if (userFallback && userFallback.length > 0) {
+              const enrichedFallback = userFallback.map(u => ({
+                reg: u.reg,
+                name: studentMatch.find(s => s.reg === u.reg)?.name || u.email
+              }));
+              setChatSearchResults(enrichedFallback);
+              return;
+            }
+          }
+          setChatSearchResults([]);
+          return;
+        }
+
+        // 2. Fetch profile structural names for the verified list
+        const userRegs = registeredUsers.map(u => u.reg);
+        const { data: profiles } = await supabase
+          .from('students')
+          .select('reg, name')
+          .in('reg', userRegs);
+
+        const enrichedResults = registeredUsers.map(u => ({
+          reg: u.reg,
+          name: profiles?.find(p => p.reg === u.reg)?.name || u.email
+        }));
+
+        setChatSearchResults(enrichedResults);
+      } catch (err) {
+        console.error("Chat search error: ", err);
+        setChatSearchResults([]);
+      }
+  };
+
   const loadAdminChatList = async () => {
     const { data, error } = await supabase.rpc('get_admin_chat_list');
     if (!error && data && data.length > 0) {
