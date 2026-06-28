@@ -370,7 +370,7 @@ function LoginContent() {
         return;
       }
   
-      let formattedMsg = 'A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM/JUNK folder!';
+      let formattedMsg = 'A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM folder!';
       setSuccessMsg(formattedMsg);
       setResendCountdown(60);
       setTimeout(() => {
@@ -964,7 +964,7 @@ function LoginContent() {
                   />
                 </div>
                 <p className="mt-3 text-[11px] text-amber-600 dark:text-amber-400 font-semibold text-center">
-                  ⚠️ Note: Check your <b>Spam or Junk email folder</b> if you don't see the code within 60 seconds.
+                  ⚠️ Note: Check your <b>SPAM folder</b> if you don't see the code within 60 seconds. \n اگر کوڈ موصول نہیں ہوا تو ای میل میں سپیم فولڈر چیک کریں۔
                 </p>
               </div>
 
