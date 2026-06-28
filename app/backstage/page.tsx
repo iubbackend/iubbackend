@@ -456,46 +456,87 @@ export default function AdminDashboardPage() {
   };
 
   const loadAdminChatList = async () => {
-    const { data, error } = await supabase.rpc('get_admin_chat_list');
-    if (!error && data && data.length > 0) {
-      const regs = data.map((d: any) => d.reg);
+    try {
+      // 1. Try the RPC first
+      let rpcData = [];
+      const { data: fetchedRpc, error: rpcError } = await supabase.rpc('get_admin_chat_list');
       
-      // Fetch latest messages for calculations
+      // 2. THE BULLETPROOF FALLBACK: If RPC fails or is empty, group the chats right here in React
+      if (rpcError || !fetchedRpc || fetchedRpc.length === 0) {
+         const { data: rawMsgs } = await supabase.from('messages')
+           .select('sender_reg, receiver_reg, created_at, is_read')
+           .or(`receiver_reg.eq.${PRIMARY_ADMIN_REG},sender_reg.eq.${PRIMARY_ADMIN_REG}`)
+           .order('created_at', { ascending: false })
+           .limit(1000);
+           
+         if (rawMsgs && rawMsgs.length > 0) {
+            const uniqueMap = new Map();
+            rawMsgs.forEach(m => {
+                const otherReg = m.sender_reg.toUpperCase() === PRIMARY_ADMIN_REG ? m.receiver_reg.toUpperCase() : m.sender_reg.toUpperCase();
+                if (!uniqueMap.has(otherReg)) {
+                    uniqueMap.set(otherReg, {
+                        reg: otherReg,
+                        unread: 0,
+                        last_msg_time: m.created_at
+                    });
+                }
+                if (!m.is_read && m.receiver_reg.toUpperCase() === PRIMARY_ADMIN_REG) {
+                    uniqueMap.get(otherReg).unread += 1;
+                }
+            });
+            rpcData = Array.from(uniqueMap.values());
+         }
+      } else {
+         rpcData = fetchedRpc;
+      }
+
+      // 3. If there are genuinely zero messages in the database, stop here.
+      if (!rpcData || rpcData.length === 0) {
+        setAdminChatList([]);
+        return;
+      }
+
+      const regs = rpcData.map((d: any) => d.reg);
+      
+      // 4. Fetch the latest text content to show underneath their name
       const { data: latestMsgs } = await supabase.from('messages')
         .select('sender_reg, receiver_reg, content, is_read, is_delivered, created_at')
         .or(`receiver_reg.eq.${PRIMARY_ADMIN_REG},sender_reg.eq.${PRIMARY_ADMIN_REG}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(1000);
 
-      // Fetch names from students table so your sidebar displays beautiful names instead of blank emails
+      // 5. Fetch their real names from the students table
       const { data: studentNames } = await supabase
         .from('students')
         .select('reg, name')
         .in('reg', regs);
 
-      const enrichedList = data.map((chat: any) => {
+      // 6. Stitch it all together for the UI
+      const enrichedList = rpcData.map((chat: any) => {
          const lastMsg = latestMsgs?.find(m => 
-            (m.sender_reg === chat.reg && m.receiver_reg === PRIMARY_ADMIN_REG) || 
-            (m.sender_reg === PRIMARY_ADMIN_REG && m.receiver_reg === chat.reg)
+            (m.sender_reg?.toUpperCase() === chat.reg?.toUpperCase() && m.receiver_reg?.toUpperCase() === PRIMARY_ADMIN_REG) || 
+            (m.sender_reg?.toUpperCase() === PRIMARY_ADMIN_REG && m.receiver_reg?.toUpperCase() === chat.reg?.toUpperCase())
          );
          
          const studentProfile = studentNames?.find(s => s.reg.toUpperCase() === chat.reg.toUpperCase());
 
          return {
              ...chat,
-             name: studentProfile ? studentProfile.name : (chat.name || "Registered User"),
+             name: studentProfile ? studentProfile.name : "Registered User",
              last_msg_content: lastMsg ? lastMsg.content : "No messages",
-             last_msg_is_me: lastMsg?.sender_reg === PRIMARY_ADMIN_REG,
+             last_msg_is_me: lastMsg?.sender_reg?.toUpperCase() === PRIMARY_ADMIN_REG,
              last_msg_is_read: lastMsg?.is_read || false,
              last_msg_is_delivered: lastMsg?.is_delivered || false,
              last_msg_time: lastMsg ? lastMsg.created_at : chat.last_msg_time
          };
       });
 
-      // Sort chats dynamically so the person who sent the freshest message jumps straight to the top
+      // Sort by newest message first
       enrichedList.sort((a, b) => new Date(b.last_msg_time).getTime() - new Date(a.last_msg_time).getTime());
       setAdminChatList(enrichedList);
-    } else {
-      if (error) console.error("Error executing admin chat list loading routing:", error);
+      
+    } catch (err) {
+      console.error("Critical dashboard exception:", err);
       setAdminChatList([]);
     }
   };
