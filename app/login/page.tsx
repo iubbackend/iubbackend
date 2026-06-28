@@ -859,7 +859,7 @@ function LoginContent() {
                       <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
                         <Phone size={18} />
                       </div>
-                      <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0311-9277832" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
+                      <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="e.g. 0301-2345678" maxLength={12} required className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500" />
                     </div>
                   </div>
 
@@ -957,14 +957,14 @@ function LoginContent() {
                     type="text"
                     value={otpToken}
                     onChange={(e) => setOtpToken(e.target.value)}
-                    placeholder="e.g. 12345678"
+                    placeholder="********"
                     maxLength={8}
                     required
                     className="w-full rounded-xl border border-gray-300 bg-gray-50 pl-10 pr-4 py-3 text-gray-900 outline-none focus:border-blue-500 dark:border-[#00348c]/50 dark:bg-[#00122a]/50 dark:text-white dark:focus:border-amber-500 font-mono tracking-widest text-center text-lg font-bold"
                   />
                 </div>
                 <p className="mt-3 text-[11px] text-amber-600 dark:text-amber-400 font-semibold text-center">
-                  ⚠️ Note: Check your <b>SPAM folder</b> if you don't see the code within 60 seconds. \n اگر کوڈ موصول نہیں ہوا تو ای میل میں سپیم فولڈر چیک کریں۔
+                  ⚠️ Note: Check your <b>SPAM folder</b> if you don't see the code within 60 seconds. <br>اگر کوڈ موصول نہیں ہوا تو ای میل میں سپیم فولڈر چیک کریں۔
                 </p>
               </div>
 
