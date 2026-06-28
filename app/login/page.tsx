@@ -964,7 +964,8 @@ function LoginContent() {
                   />
                 </div>
                 <p className="mt-3 text-[11px] text-amber-600 dark:text-amber-400 font-semibold text-center">
-                  ⚠️ Note: Check your <b>SPAM folder</b> if you don't see the code within 60 seconds. <br>اگر کوڈ موصول نہیں ہوا تو ای میل میں سپیم فولڈر چیک کریں۔
+                  ⚠️ Note: Check your <b>SPAM folder</b> if you don't see the code within 60 seconds. 
+                  اگر کوڈ موصول نہیں ہوا تو ای میل میں سپیم فولڈر چیک کریں۔
                 </p>
               </div>
 
