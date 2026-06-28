@@ -1050,6 +1050,15 @@ export default function UserDashboardPage() {
                   </button>
                 </div>
 
+                {/* NEW LOW CREDIT REMINDER BAR ADDED HERE */}
+                {!isProMode && (
+                  <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className={`mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold backdrop-blur-sm shadow-sm ${theme === 'light' ? 'bg-amber-50/90 border-amber-200 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
+                    <Info size={14} className="shrink-0 text-amber-500" />
+                    <span>You are low on balance. 7,500 Credits are needed to view full marks.</span>
+                  </motion.div>
+                )}
+                {/* END OF NEW BAR */}
+
                 {!isProMode && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }} 
@@ -1295,6 +1304,12 @@ export default function UserDashboardPage() {
                <Wallet size={40} className={`mx-auto mb-3 ${t.primary}`}/>
                <h3 className={`text-[11px] font-bold uppercase tracking-widest ${t.textMuted} mb-1.5`}>Available Balance</h3>
                <div className="text-4xl sm:text-5xl font-black">{credits.toLocaleString()} <span className="text-xl font-medium opacity-50">Credits</span></div>
+              {/* NEW BAR ADDED HERE */}
+               <div className={`inline-flex items-center justify-center gap-2 mt-5 px-4 py-2 rounded-xl border text-[11px] sm:text-xs font-bold shadow-sm transition-all ${theme === 'light' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
+                 <Info size={14} className="shrink-0 animate-pulse" />
+                 <span>7,500 Credits required to view a single detailed result</span>
+               </div>
+               {/* END OF NEW BAR */}
             </div>
 
             <div>
