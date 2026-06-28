@@ -422,17 +422,49 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleChatSearch = async (val: string) => {
-      setChatSearchQuery(val);
-      if (!val.trim()) {
-          setChatSearchResults([]);
-          return;
-      }
-      const { data } = await supabase.from('students')
+  const loadAdminChatList = async () => {
+    const { data, error } = await supabase.rpc('get_admin_chat_list');
+    if (!error && data && data.length > 0) {
+      const regs = data.map((d: any) => d.reg);
+      
+      // Fetch latest messages for calculations
+      const { data: latestMsgs } = await supabase.from('messages')
+        .select('sender_reg, receiver_reg, content, is_read, is_delivered, created_at')
+        .or(`receiver_reg.eq.${PRIMARY_ADMIN_REG},sender_reg.eq.${PRIMARY_ADMIN_REG}`)
+        .order('created_at', { ascending: false });
+
+      // Fetch names from students table so your sidebar displays beautiful names instead of blank emails
+      const { data: studentNames } = await supabase
+        .from('students')
         .select('reg, name')
-        .or(`reg.ilike.%${val}%,name.ilike.%${val}%`)
-        .limit(5);
-      setChatSearchResults(data || []);
+        .in('reg', regs);
+
+      const enrichedList = data.map((chat: any) => {
+         const lastMsg = latestMsgs?.find(m => 
+            (m.sender_reg === chat.reg && m.receiver_reg === PRIMARY_ADMIN_REG) || 
+            (m.sender_reg === PRIMARY_ADMIN_REG && m.receiver_reg === chat.reg)
+         );
+         
+         const studentProfile = studentNames?.find(s => s.reg.toUpperCase() === chat.reg.toUpperCase());
+
+         return {
+             ...chat,
+             name: studentProfile ? studentProfile.name : (chat.name || "Registered User"),
+             last_msg_content: lastMsg ? lastMsg.content : "No messages",
+             last_msg_is_me: lastMsg?.sender_reg === PRIMARY_ADMIN_REG,
+             last_msg_is_read: lastMsg?.is_read || false,
+             last_msg_is_delivered: lastMsg?.is_delivered || false,
+             last_msg_time: lastMsg ? lastMsg.created_at : chat.last_msg_time
+         };
+      });
+
+      // Sort chats dynamically so the person who sent the freshest message jumps straight to the top
+      enrichedList.sort((a, b) => new Date(b.last_msg_time).getTime() - new Date(a.last_msg_time).getTime());
+      setAdminChatList(enrichedList);
+    } else {
+      if (error) console.error("Error executing admin chat list loading routing:", error);
+      setAdminChatList([]);
+    }
   };
 
   const loadAdminSingleChat = async (reg: string, name: string) => {
@@ -938,7 +970,7 @@ export default function AdminDashboardPage() {
                             <p className="text-[11px] opacity-60 truncate">{u.last_msg_is_me && "You: "}{u.last_msg_content}</p>
                           </div>
                           <div className="flex flex-col items-end gap-1">
-                            <span className="text-[9px] opacity-50 font-mono">{new Date(u.last_msg_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                            <span className="text-[9px] opacity-50 font-mono">{u.last_msg_time ? new Date(u.last_msg_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                             <div className="flex items-center gap-1.5">
                                 {u.last_msg_is_me && (
                                     u.last_msg_is_read ? <CheckCheck size={12} className="text-blue-400" /> : u.last_msg_is_delivered ? <CheckCheck size={12} className="text-gray-400" /> : <Check size={12} className="text-gray-400" />
