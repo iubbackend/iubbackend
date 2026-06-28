@@ -693,10 +693,10 @@ export default function UserDashboardPage() {
         setUnlockedRegs(prev => new Set(prev).add(reg));
         if (isPro) {
           setCredits(p => Math.max(0, p - SEARCH_COST));
-          logSearch(`Target Student ID: ${studentId}`, "Paid Search");
+          logSearch(reg, "Paid Search");
         } else {
           setFreeAttempts(p => Math.max(0, p - 1));
-          logSearch(`Target Student ID: ${studentId}`, "Free Search");
+          logSearch(reg, "Free Search");
         }
       }
 
