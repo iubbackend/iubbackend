@@ -1144,7 +1144,7 @@ export default function UserDashboardPage() {
                 {!isProMode && (
                   <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className={`mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold backdrop-blur-sm shadow-sm ${theme === 'light' ? 'bg-amber-50/90 border-amber-200 text-amber-700' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
                     <Info size={14} className="shrink-0 text-amber-500" />
-                    <span>You are low on balance. 7,500 Credits are needed to view full marks.</span>
+                    <span>You are low on balance. 3000 Credits are needed to view single semester's marks.</span>
                   </motion.div>
                 )}
                 {/* END OF NEW BAR */}
