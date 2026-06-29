@@ -688,17 +688,6 @@ export default function UserDashboardPage() {
         return;
       }
 
-      // 2. Update Local UI State & Log Search safely
-      if (!isUnlocked) {
-        setUnlockedRegs(prev => new Set(prev).add(reg));
-        if (isPro) {
-          setCredits(p => Math.max(0, p - SEARCH_COST));
-          logSearch(reg, "Paid Search");
-        } else {
-          setFreeAttempts(p => Math.max(0, p - 1));
-          logSearch(reg, "Free Search");
-        }
-      }
 
       if (!records || records.length === 0) {
         setStudentDetails([]);
