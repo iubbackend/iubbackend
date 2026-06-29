@@ -538,11 +538,12 @@ export default function UserDashboardPage() {
 
     if (!activeQuery.trim()) return;
 
+    // PRESERVED: Your exact original rate limit UI check
     try {
       const { data: isAllowed, error: rateError } = await supabase.rpc('check_rate_limit', {
         p_user_reg: currentUser.reg,
         p_max_actions: 5,        
-        p_window_seconds: 60     
+        p_window_seconds: 60      
       });
 
       if (rateError || !isAllowed) {
@@ -554,51 +555,51 @@ export default function UserDashboardPage() {
       console.error("Rate limit parsing error:", limitErr);
     }
 
+    // PRESERVED: Your exact state resets
     setIsSearching(true);
     setExpandedReg(null);
     setStudentDetails(null);
     setPage(newPage);
 
     try {
-      let query = supabase.from("students").select(`id, reg, name, academic_sessions(session_code), sections(section_name)`, { count: 'exact' });
-
-      if (activeMode === "Roll Number") {
-        query = query.ilike("reg", `%${activeQuery.trim()}%`);
-      } else {
-        query = query.ilike("name", `%${activeQuery.trim()}%`);
-        
-        // Map selected session correctly to "S25%" prefixes
-        if (selectedSession && selectedSession.label) {
-          const mappedPrefix = parseSessionToPrefix(selectedSession.label);
-          if (mappedPrefix) {
-             query = query.ilike("reg", `${mappedPrefix}%`);
-          }
-        }
-        if (selectedSection) query = query.eq("section_id", selectedSection.id);
-        
-        if (selectedDept) {
-          const { data: matchingResults } = await supabase.from("results").select("student_id").eq("department_id", selectedDept.id);
-          const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
-          if (studentIds.length === 0) {
-            setSearchResults([]);
-            setTotalRecords(0);
-            setIsSearching(false);
-            return;
-          }
-          query = query.in("id", studentIds);
-        }
+      let mappedPrefix = "";
+      // PRESERVED: Your exact session mapping logic
+      if (activeMode === "Name" && selectedSession && selectedSession.label) {
+        mappedPrefix = parseSessionToPrefix(selectedSession.label) || "";
       }
 
-      query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
-      const { data, count, error } = await query;
-      if (error) throw error;
+      // REPLACED: Direct table query is swapped for the secure RPC
+      const { data, error } = await supabase.rpc('secure_student_search', {
+        p_search_query: activeQuery.trim(),
+        p_search_mode: activeMode,
+        p_page: newPage,
+        p_session_prefix: mappedPrefix || null,
+        p_section_id: selectedSection ? selectedSection.id : null,
+        p_dept_id: selectedDept ? selectedDept.id : null
+      });
 
-      setSearchResults((data || []).map((s: any) => ({
-        id: s.id, reg: s.reg, name: s.name,
-        session: s.academic_sessions?.session_code || "N/A",
-        section: s.sections?.section_name || "N/A"
+      // Handle the new Wallet error from the backend
+      if (error) {
+        if (error.message.includes('Insufficient balance')) {
+          showToast("Out of Balance", "You need 3000 credits or free attempts to search the directory.", "error");
+          setActiveTab('credits'); // Redirect them to top-up
+        } else {
+          throw error;
+        }
+        setIsSearching(false);
+        return;
+      }
+
+      // PRESERVED: Your exact data mapping logic (adjusting slightly for the RPC's joined column names)
+      setSearchResults((data.data || []).map((s: any) => ({
+        id: s.id, 
+        reg: s.reg, 
+        name: s.name,
+        session: s.session_code || "N/A",
+        section: s.section_name || "N/A"
       })));
-      setTotalRecords(count || 0);
+      
+      setTotalRecords(data.total || 0);
 
     } catch (err) {
       showToast("Error", "Could not complete search.", "error");
