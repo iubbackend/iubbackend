@@ -1394,7 +1394,7 @@ export default function UserDashboardPage() {
               {/* NEW BAR ADDED HERE */}
                <div className={`inline-flex items-center justify-center gap-2 mt-5 px-4 py-2 rounded-xl border text-[11px] sm:text-xs font-bold shadow-sm transition-all ${theme === 'light' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
                  <Info size={14} className="shrink-0 animate-pulse" />
-                 <span>7,500 Credits required to view a single detailed result</span>
+                 <span>3000 Credits required to view a single detailed result</span>
                </div>
                {/* END OF NEW BAR */}
             </div>
