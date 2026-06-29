@@ -727,6 +727,7 @@ export default function UserDashboardPage() {
           code: rec.subject_id?.course_code || "N/A",
           name: rec.subject_id?.course_name || "Unknown",
           credits: credits,
+          db_sem_num: rec.semester_num, // <-- ADD THIS LINE
           mid: roundMark(rec.mid_term_marks),
           sess: roundMark(rec.sessional_marks),
           fin: roundMark(rec.end_term_marks),
@@ -747,8 +748,11 @@ export default function UserDashboardPage() {
         const courses = grouped[sem];
         let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
         
-        // Dynamically detect if this semester is unlocked by checking if ANY course has total marks
         const canCalculate = courses.some((c: any) => c.tot !== null);
+        
+        // <-- ADD THIS TO GRAB THE EXACT DB INTEGER
+        const validSemNums = courses.map((c: any) => c.db_sem_num).filter((n: any) => n !== null && n !== undefined);
+        const dbSemNum = validSemNums.length > 0 ? validSemNums[0] : (parseInt(sem.replace(/\D/g, '')) || -1);
 
         courses.forEach((c: any) => {
            if (canCalculate && c.tot !== null) {
@@ -765,6 +769,7 @@ export default function UserDashboardPage() {
 
         return {
           semNum: sem.replace("Semester ", ""), 
+          dbSemNum: dbSemNum, // <-- ADD THIS EXPORT
           courses: courses,
           sgpa: sgpa,
           totalMarks: canCalculate ? semTotalMarks : "🔒",
@@ -780,7 +785,7 @@ export default function UserDashboardPage() {
     }
   };
 
-  const handleUnlockSpecificSemester = async (studentId: number, semesterNum: string) => {
+  const handleUnlockSpecificSemester = async (studentId: number, semesterNum: string, dbSemNum: number) => {
     if (credits < SEARCH_COST) {
       showToast("Out of Balance", `You need ${SEARCH_COST} credits to unlock previous semesters.`, "error");
       setActiveTab('credits');
@@ -788,18 +793,20 @@ export default function UserDashboardPage() {
     }
 
     try {
-      // 1. Fetch the raw unlocked data from the database
+      // 1. Fetch using the EXACT database integer
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
-        // Fallback to -1 if parseInt fails so the DB doesn't accidentally dump everything
-        p_semester_num: parseInt(semesterNum) || -1, 
+        p_semester_num: dbSemNum, 
         p_is_pro: true 
       });
 
       if (error || !records) throw error;
       showToast("Unlocked", `Semester ${semesterNum} unlocked successfully.`, "info");
+      
+      // Optimistically deduct balance for UI snappy feel
+      setCredits(prev => Math.max(0, prev - SEARCH_COST));
 
-      // 2. Build a quick lookup dictionary of the highest marks returned by the DB
+      // 2. Build lookup dictionary
       const unlockedDict = new Map();
       records.forEach((rec: any) => {
         const courseCode = rec.subject_id?.course_code || "N/A";
@@ -811,29 +818,28 @@ export default function UserDashboardPage() {
 
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
 
-      // 3. STRICT MERGE: Only update marks for subjects that ALREADY belong to this semester
+      // 3. STRICT MERGE
       setStudentDetails((prev: any) => {
           if (!prev) return prev;
           
           return prev.map((sem: any) => {
-              // Only modify the semester the user actually clicked
               if (sem.semNum === semesterNum) {
                   let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
 
-                  // Map through the original, clean courses we already grouped for this semester
                   const updatedCourses = sem.courses.map((existingCourse: any) => {
                       const unlockedRec = unlockedDict.get(existingCourse.code);
                       
-                      // If the DB sent us real marks for this specific course, apply them
-                      if (unlockedRec && unlockedRec.total_marks !== null) {
+                      if (unlockedRec) {
                           const totalMarks = roundMark(unlockedRec.total_marks);
                           const gradeInfo = getGradeInfo(totalMarks);
                           const creds = existingCourse.credits;
 
-                          totalQualityPoints += (gradeInfo.gp * creds);
+                          if (totalMarks !== null) {
+                              totalQualityPoints += (gradeInfo.gp * creds);
+                              semTotalMarks += totalMarks;
+                              semMaxMarks += 100;
+                          }
                           totalCr += creds;
-                          semTotalMarks += totalMarks;
-                          semMaxMarks += 100;
 
                           return {
                               ...existingCourse,
@@ -847,7 +853,6 @@ export default function UserDashboardPage() {
                               grade: gradeInfo.grade
                           };
                       } else {
-                          // Fallback: If DB didn't return marks for it, leave it locked
                           totalCr += existingCourse.credits;
                           return existingCourse;
                       }
@@ -857,7 +862,7 @@ export default function UserDashboardPage() {
 
                   return {
                       ...sem,
-                      courses: updatedCourses, // The clean, exact list of subjects
+                      courses: updatedCourses,
                       canCalculate: true,
                       sgpa: sgpa,
                       totalMarks: semTotalMarks,
@@ -1347,7 +1352,7 @@ export default function UserDashboardPage() {
                                         <motion.button 
                                           onClick={(e) => {
                                               e.stopPropagation();
-                                              handleUnlockSpecificSemester(student.id, sem.semNum);
+                                              handleUnlockSpecificSemester(student.id, sem.semNum, sem.dbSemNum); // <-- UPDATE HERE
                                           }}
                                           whileHover={{ scale: 1.01 }}
                                           whileTap={{ scale: 0.98 }}
