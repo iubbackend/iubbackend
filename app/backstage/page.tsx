@@ -192,9 +192,12 @@ export default function AdminDashboardPage() {
     return (match[1].charAt(0) + match[2].slice(-2)).toUpperCase(); 
   };
 
-  const handleSearch = async (e?: React.FormEvent, newPage = 0) => {
+  const handleSearch = async (e?: React.FormEvent, newPage = 0, overrideQuery?: string, overrideMode?: SearchMode) => {
     if (e) e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const activeQuery = overrideQuery !== undefined ? overrideQuery : searchQuery;
+    const activeMode = overrideMode !== undefined ? overrideMode : searchMode;
+
+    if (!activeQuery.trim()) return;
 
     setIsSearching(true);
     setExpandedReg(null);
@@ -202,41 +205,38 @@ export default function AdminDashboardPage() {
     setPage(newPage);
 
     try {
-      let query = supabase.from("students").select(`id, reg, name, academic_sessions(session_code), sections(section_name)`, { count: 'exact' });
-
-      if (searchMode === "Roll Number") {
-        query = query.ilike("reg", `%${searchQuery.trim()}%`);
-      } else {
-        query = query.ilike("name", `%${searchQuery.trim()}%`);
-        if (selectedSession && selectedSession.label) {
-          const mappedPrefix = parseSessionToPrefix(selectedSession.label);
-          if (mappedPrefix) query = query.ilike("reg", `${mappedPrefix}%`);
-        }
-        if (selectedSection) query = query.eq("section_id", selectedSection.id);
-        
-        if (selectedDept) {
-          const { data: matchingResults } = await supabase.from("results").select("student_id").eq("department_id", selectedDept.id);
-          const studentIds = Array.from(new Set(matchingResults?.map(r => r.student_id) || []));
-          if (studentIds.length === 0) {
-            setSearchResults([]);
-            setTotalRecords(0);
-            setIsSearching(false);
-            return;
-          }
-          query = query.in("id", studentIds);
-        }
+      let mappedPrefix = null;
+      if (activeMode === "Name" && selectedSession && selectedSession.label) {
+        mappedPrefix = parseSessionToPrefix(selectedSession.label);
       }
 
-      query = query.range(newPage * 10, (newPage + 1) * 10 - 1);
-      const { data, count, error } = await query;
-      if (error) throw error;
+      // Call the secure backend function instead of the direct table
+      const { data, error } = await supabase.rpc('secure_student_search', {
+        p_search_query: activeQuery.trim(),
+        p_search_mode: activeMode,
+        p_page: newPage,
+        p_session_prefix: mappedPrefix,
+        p_section_id: selectedSection ? selectedSection.id : null,
+        p_dept_id: selectedDept ? selectedDept.id : null
+      });
 
-      setSearchResults((data || []).map((s: any) => ({
+      if (error) {
+        if (error.message.includes('Rate limit')) {
+          showToast("Slow Down", "Rate limit exceeded. Please wait a moment.", "error");
+        } else {
+          throw error;
+        }
+        setIsSearching(false);
+        return;
+      }
+
+      // Parse the JSON response
+      setSearchResults((data.data || []).map((s: any) => ({
         id: s.id, reg: s.reg, name: s.name,
-        session: s.academic_sessions?.session_code || "N/A",
-        section: s.sections?.section_name || "N/A"
+        session: s.session_code || "N/A",
+        section: s.section_name || "N/A"
       })));
-      setTotalRecords(count || 0);
+      setTotalRecords(data.total || 0);
 
     } catch (err) {
       showToast("Error", "Could not complete search.", "error");
