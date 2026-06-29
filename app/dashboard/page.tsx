@@ -520,19 +520,15 @@ export default function UserDashboardPage() {
     })
   };
 
-  const logSearch = async (query, type) => {
+  const logSearch = async (query: string, type: string) => {
     try {
-      // Ensure we are passing strings as per your schema
-      const { error } = await supabase.from("user_search_log").insert({
-        searcher_reg: currentUser.reg.toString(),
-        searcher_name: currentUser.name.toString(),
-        search_query: query.toString(),
-        search_type: type.toString()
+      await supabase.from("user_search_log").insert({
+        searcher_reg: currentUser.reg,
+        searcher_name: currentUser.name,
+        search_query: query,
+        search_type: type
       });
-      if (error) console.error("Log error:", error);
-    } catch (err) {
-      console.error("Log exception:", err);
-    }
+    } catch (err) {}
   };
 
   const handleSearch = async (e?: React.FormEvent, newPage = 0, overrideQuery?: string, overrideMode?: SearchMode) => {
@@ -597,18 +593,12 @@ export default function UserDashboardPage() {
       const { data, count, error } = await query;
       if (error) throw error;
 
-      // Inside handleSearch, after setting results:
       setSearchResults((data || []).map((s: any) => ({
         id: s.id, reg: s.reg, name: s.name,
         session: s.academic_sessions?.session_code || "N/A",
         section: s.sections?.section_name || "N/A"
       })));
       setTotalRecords(count || 0);
-
-      // ADD THIS CALL:
-      if (activeQuery) {
-        await logSearch(activeQuery, "Directory Search");
-      }
 
     } catch (err) {
       showToast("Error", "Could not complete search.", "error");
