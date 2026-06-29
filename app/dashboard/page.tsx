@@ -668,23 +668,27 @@ export default function UserDashboardPage() {
       return;
     }
 
-    const isPro = isProMode;
+    // Check if they already paid to unlock this specific student in this session
     const isUnlocked = unlockedRegs.has(reg);
 
-    if (!isUnlocked && !isPro && freeAttempts <= 0) {
-      showToast("Out of Attempts", "Redirecting to wallet to top up.", "error");
-      setActiveTab('credits');
-      return;
+    // Enforce strict 3000 credit cut for the initial expand
+    if (!isUnlocked) {
+      if (credits < 3000) {
+        showToast("Out of Balance", "You need 3000 credits to view this student's results.", "error");
+        setActiveTab('credits');
+        return;
+      }
+      // Optimistically deduct 3000 credits for the UI feel
+      setCredits(prev => Math.max(0, prev - 3000));
     }
 
     setExpandedReg(reg);
 
     try {
-      // Pass null for p_semester_num to get the entire UI structure with only the latest semester unlocked
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
         p_semester_num: null,
-        p_is_pro: isPro 
+        p_is_pro: true 
       });
 
       if (error) throw error;
@@ -728,7 +732,7 @@ export default function UserDashboardPage() {
           code: rec.subject_id?.course_code || "N/A",
           name: rec.subject_id?.course_name || "Unknown",
           credits: credits,
-          db_sem_num: rec.semester_num, // <-- ADD THIS LINE
+          db_sem_num: rec.semester_num,
           mid: roundMark(rec.mid_term_marks),
           sess: roundMark(rec.sessional_marks),
           fin: roundMark(rec.end_term_marks),
@@ -751,7 +755,6 @@ export default function UserDashboardPage() {
         
         const canCalculate = courses.some((c: any) => c.tot !== null);
         
-        // <-- ADD THIS TO GRAB THE EXACT DB INTEGER
         const validSemNums = courses.map((c: any) => c.db_sem_num).filter((n: any) => n !== null && n !== undefined);
         const dbSemNum = validSemNums.length > 0 ? validSemNums[0] : (parseInt(sem.replace(/\D/g, '')) || -1);
 
@@ -770,7 +773,7 @@ export default function UserDashboardPage() {
 
         return {
           semNum: sem.replace("Semester ", ""), 
-          dbSemNum: dbSemNum, // <-- ADD THIS EXPORT
+          dbSemNum: dbSemNum,
           courses: courses,
           sgpa: sgpa,
           totalMarks: canCalculate ? semTotalMarks : "🔒",
@@ -781,8 +784,12 @@ export default function UserDashboardPage() {
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
-      showToast("Access Denied", "Could not verify tokens.", "error");
+      showToast("Access Denied", "Could not fetch data.", "error");
       setExpandedReg(null);
+      // Rollback the optimistic deduction if the server failed
+      if (!isUnlocked) {
+        setCredits(prev => prev + 3000);
+      }
     }
   };
 
