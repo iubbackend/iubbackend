@@ -791,17 +791,30 @@ export default function UserDashboardPage() {
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
         p_semester_num: parseInt(semesterNum),
-        p_is_pro: true // Always charge for past semesters
+        p_is_pro: true 
       });
 
       if (error || !records) throw error;
       showToast("Unlocked", `Semester ${semesterNum} unlocked successfully.`, "info");
 
-      // We need to re-process just this one semester and merge it into our existing state
+      // === NEW FIX: DEDUPLICATION & MAX MARKS LOGIC ===
+      const uniqueCourses = new Map();
+      records.forEach((rec: any) => {
+        const courseCode = rec.subject_id?.course_code || "N/A";
+        const currentTotal = Number(rec.total_marks) || 0;
+        
+        // Only keep the course if it doesn't exist yet, OR if the current row has higher marks
+        if (!uniqueCourses.has(courseCode) || Number(uniqueCourses.get(courseCode).total_marks || 0) < currentTotal) {
+          uniqueCourses.set(courseCode, rec);
+        }
+      });
+      // ================================================
+
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
       let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
       
-      const unlockedCourses = records.map((rec: any) => {
+      // We now map over the UNIQUE courses, not the raw records
+      const unlockedCourses = Array.from(uniqueCourses.values()).map((rec: any) => {
         const totalMarks = roundMark(rec.total_marks);
         const gradeInfo = getGradeInfo(totalMarks);
         const creds = Number(rec.subject_id?.credit_hours) || 3;
