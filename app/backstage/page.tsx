@@ -588,28 +588,20 @@ export default function AdminDashboardPage() {
   // === PAYMENT ACTIONS ===
   const handleAdminApprove = async (paymentId: string, reg: string, amount: number) => {
     try {
-      await supabase.rpc('approve_payment_and_credit', { p_payment_id: paymentId, p_user_reg: reg.toUpperCase(), p_amount: amount });
+      const { error } = await supabase.rpc('approve_payment_and_credit', { 
+        p_payment_id: paymentId, 
+        p_user_reg: reg.toUpperCase(), 
+        p_amount: amount 
+      });
+      
+      if (error) throw error;
+
       showToast("Approved", `Approved Rs ${amount}`, "info");
       loadRealAdminData(0);
       if (activeAdminChatUser?.reg === reg) loadAdminSingleChat(reg, activeAdminChatUser.name);
     } catch (e: any) {
-       // Fallback if RPC fails/disabled
-       await supabase.from('payments_record').update({ status: 'approved' }).eq('id', paymentId);
-       
-       let calcCredits = 0;
-       if (amount === 5000) calcCredits = 125000;
-       else if (amount === 1000) calcCredits = 17000;
-       else if (amount === 500) calcCredits = 7500;
-       else calcCredits = amount * 15;
-
-       const { data: existing } = await supabase.from('user_credits').select('credits').eq('user_reg', reg).maybeSingle();
-       if (existing) {
-           await supabase.from('user_credits').update({ credits: existing.credits + calcCredits }).eq('user_reg', reg);
-       } else {
-           await supabase.from('user_credits').insert({ user_reg: reg, credits: calcCredits, free_searches_today: 0 });
-       }
-       showToast("Approved (Fallback)", `Approved Rs ${amount}`, "info");
-       loadRealAdminData(0);
+       console.error("Server-side approval failed:", e);
+       showToast("Error", "Server failed to approve payment. Check database logs.", "error");
     }
   };
 
@@ -625,26 +617,28 @@ export default function AdminDashboardPage() {
   const handleManualAward = async (saveRecord: boolean) => {
     if(!manualPay.reg || !manualPay.amount) return showToast("Error", "Enter Reg and Amount", "error");
     const cleanReg = manualPay.reg.toUpperCase().trim();
-    if (saveRecord) {
-        const { data: pending } = await supabase.from('payments_record').insert({
-            user_reg: cleanReg, amount: Number(manualPay.amount), account_name: 'Admin Manual', tid_number: 'MANUAL-' + Date.now(), package_id: 'custom'
-        }).select().single();
-        if(pending) await handleAdminApprove(pending.id, pending.user_reg, pending.amount);
-    } else {
-        let calcCredits = 0;
-        const numAmount = Number(manualPay.amount);
-        if (numAmount === 5000) calcCredits = 125000;
-        else if (numAmount === 1000) calcCredits = 17000;
-        else if (numAmount === 500) calcCredits = 7500;
-        else calcCredits = numAmount * 15;
-
-        const { data: existing } = await supabase.from('user_credits').select('credits').eq('user_reg', cleanReg).maybeSingle();
-        if (existing) {
-            await supabase.from('user_credits').update({ credits: existing.credits + calcCredits }).eq('user_reg', cleanReg);
+    
+    try {
+        if (saveRecord) {
+            // Safe: Our Phase 1 trigger forces this to 'pending' automatically
+            const { data: pending, error: insertError } = await supabase.from('payments_record').insert({
+                user_reg: cleanReg, amount: Number(manualPay.amount), account_name: 'Admin Manual', tid_number: 'MANUAL-' + Date.now(), package_id: 'custom'
+            }).select().single();
+            
+            if (insertError) throw insertError;
+            if (pending) await handleAdminApprove(pending.id, pending.user_reg, pending.amount);
         } else {
-            await supabase.from('user_credits').insert({ user_reg: cleanReg, credits: calcCredits, free_searches_today: 0 });
+            // Safe: Math happens entirely on the server now
+            const { error: rpcError } = await supabase.rpc('grant_silent_credits', {
+               p_user_reg: cleanReg,
+               p_amount: Number(manualPay.amount)
+            });
+            
+            if (rpcError) throw rpcError;
+            showToast("Awarded", "Silent credits awarded successfully.", "info");
         }
-        showToast("Awarded", "Silent credits awarded successfully.", "info");
+    } catch (err) {
+        showToast("Error", "Manual award failed.", "error");
     }
     setManualPay({ reg: "", amount: "" });
   };
