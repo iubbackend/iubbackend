@@ -1308,22 +1308,6 @@ export default function UserDashboardPage() {
                                           ))}
                                         </tbody>
                                       </table>
-                                      {!sem.canCalculate && (
-                                          <div className="p-3 bg-black/5 dark:bg-white/5 border-t border-slate-200 dark:border-[#00348c]">
-                                            <motion.button 
-                                              onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleUnlockSpecificSemester(student.id, sem.semNum);
-                                              }}
-                                              whileHover={{ scale: 1.01 }}
-                                              whileTap={{ scale: 0.98 }}
-                                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-black text-sm uppercase tracking-wide transition-all shadow-md ${theme === 'light' ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 border-amber-300' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-[#00122a] border-amber-400'}`}
-                                            >
-                                              <Unlock size={18} />
-                                              Unlock Semester {sem.semNum} (3,000 Credits)
-                                            </motion.button>
-                                          </div>
-                                        )}
                                     </div>
                                     <div className={`px-3 py-3 sm:px-4 flex justify-between items-center text-xs border-t ${t.border} ${theme === 'light' ? 'bg-slate-100/50' : 'bg-[#00205b]/30'}`}>
                                       <div className="font-bold opacity-80">
@@ -1338,6 +1322,22 @@ export default function UserDashboardPage() {
                                         </div>
                                       </div>
                                     </div>
+                                    {!sem.canCalculate && (
+                                      <div className="p-3 bg-black/5 dark:bg-white/5 border-t border-slate-200 dark:border-[#00348c]">
+                                        <motion.button 
+                                          onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleUnlockSpecificSemester(student.id, sem.semNum);
+                                          }}
+                                          whileHover={{ scale: 1.01 }}
+                                          whileTap={{ scale: 0.98 }}
+                                          className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-black text-sm uppercase tracking-wide transition-all shadow-md ${theme === 'light' ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 border-amber-300' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-[#00122a] border-amber-400'}`}
+                                        >
+                                          <Unlock size={18} />
+                                          Unlock Semester {sem.semNum} (3,000 Credits)
+                                        </motion.button>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
 
