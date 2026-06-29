@@ -17,7 +17,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 const ADMIN_REG = "S20BSCS1M01001"; // Target for contact support
-const SEARCH_COST = 7500; 
+const SEARCH_COST = 3000;
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
@@ -232,11 +232,15 @@ export default function UserDashboardPage() {
 
         // Fetch Credits
         const { data: userCreditsRes } = await supabase.from("user_credits").select("*").ilike("user_reg", actualReg).maybeSingle();
+        // Replace the old userCreditsRes logic with this:
         if (userCreditsRes) {
           setCredits(userCreditsRes.credits || 0);
           localStorage.setItem("iub_credits", (userCreditsRes.credits || 0).toString());
           
-          const attempts = Math.max(0, 4 - (userCreditsRes.free_searches_today || 0));
+          const resetDate = userCreditsRes.free_search_reset_at ? new Date(userCreditsRes.free_search_reset_at) : new Date();
+          const isReset = new Date() > resetDate;
+          
+          const attempts = isReset ? 4 : Math.max(0, 4 - (userCreditsRes.free_searches_used || 0));
           setFreeAttempts(attempts);
           localStorage.setItem("iub_freeAttempts", attempts.toString());
         }
@@ -657,13 +661,13 @@ export default function UserDashboardPage() {
     return `${semesterType} ${year}`;
   };
 
-  const handleExpandResult = async (reg: string, studentId: number, forcePro = false) => {
-    if (expandedReg === reg && !forcePro) {
+  const handleExpandResult = async (reg: string, studentId: number) => {
+    if (expandedReg === reg) {
       setExpandedReg(null);
       return;
     }
 
-    const isPro = forcePro || isProMode;
+    const isPro = isProMode;
     const isUnlocked = unlockedRegs.has(reg);
 
     if (!isUnlocked && !isPro && freeAttempts <= 0) {
@@ -675,26 +679,24 @@ export default function UserDashboardPage() {
     setExpandedReg(reg);
 
     try {
-      // 1. ONE SECURE CALL: The server deducts the balance AND fetches the data
-      const { data: records, error } = await supabase.rpc('unlock_and_fetch_results', { 
+      // Pass null for p_semester_num to get the entire UI structure with only the latest semester unlocked
+      const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
+        p_semester_num: null,
         p_is_pro: isPro 
       });
 
-      if (error) {
-        console.error("Secure fetch failed:", error);
-        showToast("Access Denied", "Could not verify search tokens safely. Please retry.", "error");
-        setExpandedReg(null);
-        return;
-      }
+      if (error) throw error;
 
+      if (!isUnlocked) {
+        setUnlockedRegs(prev => new Set(prev).add(reg));
+      }
 
       if (!records || records.length === 0) {
         setStudentDetails([]);
         return;
       }
 
-      // 3. Process the data for the UI
       const studentCard = searchResults?.find(s => s.id === studentId);
       const rawSection = studentCard?.section || "General Data";
       const semMatch = rawSection.match(/-(\d+)(ST|ND|RD|TH)/i);
@@ -706,7 +708,6 @@ export default function UserDashboardPage() {
         const courseCode = rec.subject_id?.course_code || "N/A";
         const key = `${sem}-${courseCode}`;
         const currentTotal = Number(rec.total_marks) || 0;
-
         if (!uniqueCourses.has(key) || Number(uniqueCourses.get(key).total_marks || 0) < currentTotal) {
           uniqueCourses.set(key, rec);
         }
@@ -718,8 +719,8 @@ export default function UserDashboardPage() {
         const sem = rec.semester || calculatedSemester;
         if (!acc[sem]) acc[sem] = [];
         
-        const totalMarks = isPro ? roundMark(rec.total_marks) : null;
-        const gradeInfo = isPro ? getGradeInfo(totalMarks) : { gp: 0, grade: '🔒' };
+        const totalMarks = roundMark(rec.total_marks);
+        const gradeInfo = totalMarks !== null ? getGradeInfo(totalMarks) : { gp: 0, grade: '🔒' };
         const credits = Number(rec.subject_id?.credit_hours) || 3;
 
         acc[sem].push({
@@ -727,10 +728,10 @@ export default function UserDashboardPage() {
           name: rec.subject_id?.course_name || "Unknown",
           credits: credits,
           mid: roundMark(rec.mid_term_marks),
-          sess: isPro ? roundMark(rec.sessional_marks) : null,
-          fin: isPro ? roundMark(rec.end_term_marks) : null,
-          prSess: isPro ? roundMark(rec.practical_sessional_marks) : null,
-          prFin: isPro ? roundMark(rec.practical_final_marks) : null,
+          sess: roundMark(rec.sessional_marks),
+          fin: roundMark(rec.end_term_marks),
+          prSess: roundMark(rec.practical_sessional_marks),
+          prFin: roundMark(rec.practical_final_marks),
           tot: totalMarks,
           gp: gradeInfo.gp,
           grade: gradeInfo.grade
@@ -745,7 +746,9 @@ export default function UserDashboardPage() {
       }).map(sem => {
         const courses = grouped[sem];
         let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
-        let canCalculate = isPro;
+        
+        // Dynamically detect if this semester is unlocked by checking if ANY course has total marks
+        const canCalculate = courses.some((c: any) => c.tot !== null);
 
         courses.forEach((c: any) => {
            if (canCalculate && c.tot !== null) {
@@ -758,7 +761,7 @@ export default function UserDashboardPage() {
            }
         });
 
-        const sgpa = canCalculate && totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : (canCalculate ? "0.00" : "🔒");
+        const sgpa = canCalculate && totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "🔒";
 
         return {
           semNum: sem.replace("Semester ", ""), 
@@ -772,8 +775,81 @@ export default function UserDashboardPage() {
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
-      console.error(err);
-      setStudentDetails([]);
+      showToast("Access Denied", "Could not verify tokens.", "error");
+      setExpandedReg(null);
+    }
+  };
+
+  const handleUnlockSpecificSemester = async (studentId: number, semesterNum: string) => {
+    if (credits < SEARCH_COST) {
+      showToast("Out of Balance", `You need ${SEARCH_COST} credits to unlock previous semesters.`, "error");
+      setActiveTab('credits');
+      return;
+    }
+
+    try {
+      const { data: records, error } = await supabase.rpc('unlock_semester', { 
+        p_student_id: studentId, 
+        p_semester_num: parseInt(semesterNum),
+        p_is_pro: true // Always charge for past semesters
+      });
+
+      if (error || !records) throw error;
+      showToast("Unlocked", `Semester ${semesterNum} unlocked successfully.`, "info");
+
+      // We need to re-process just this one semester and merge it into our existing state
+      const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
+      let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
+      
+      const unlockedCourses = records.map((rec: any) => {
+        const totalMarks = roundMark(rec.total_marks);
+        const gradeInfo = getGradeInfo(totalMarks);
+        const creds = Number(rec.subject_id?.credit_hours) || 3;
+        
+        if (totalMarks !== null) {
+             totalQualityPoints += (gradeInfo.gp * creds);
+             totalCr += creds;
+             semTotalMarks += totalMarks;
+             semMaxMarks += 100;
+        }
+
+        return {
+          code: rec.subject_id?.course_code || "N/A",
+          name: rec.subject_id?.course_name || "Unknown",
+          credits: creds,
+          mid: roundMark(rec.mid_term_marks),
+          sess: roundMark(rec.sessional_marks),
+          fin: roundMark(rec.end_term_marks),
+          prSess: roundMark(rec.practical_sessional_marks),
+          prFin: roundMark(rec.practical_final_marks),
+          tot: totalMarks,
+          gp: gradeInfo.gp,
+          grade: gradeInfo.grade
+        };
+      });
+
+      const sgpa = totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "0.00";
+
+      // Hot-swap the newly unlocked semester into the UI array
+      setStudentDetails((prev: any) => {
+          if (!prev) return prev;
+          return prev.map((sem: any) => {
+              if (sem.semNum === semesterNum) {
+                  return {
+                      ...sem,
+                      courses: unlockedCourses,
+                      canCalculate: true,
+                      sgpa: sgpa,
+                      totalMarks: semTotalMarks,
+                      maxMarks: semMaxMarks
+                  };
+              }
+              return sem;
+          });
+      });
+
+    } catch (err) {
+       showToast("Error", "Failed to unlock semester. Please try again.", "error");
     }
   };
 
@@ -1232,6 +1308,22 @@ export default function UserDashboardPage() {
                                           ))}
                                         </tbody>
                                       </table>
+                                      {!sem.canCalculate && (
+                                          <div className="p-3 bg-black/5 dark:bg-white/5 border-t border-slate-200 dark:border-[#00348c]">
+                                            <motion.button 
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleUnlockSpecificSemester(student.id, sem.semNum);
+                                              }}
+                                              whileHover={{ scale: 1.01 }}
+                                              whileTap={{ scale: 0.98 }}
+                                              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-black text-sm uppercase tracking-wide transition-all shadow-md ${theme === 'light' ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 border-amber-300' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-[#00122a] border-amber-400'}`}
+                                            >
+                                              <Unlock size={18} />
+                                              Unlock Semester {sem.semNum} (3,000 Credits)
+                                            </motion.button>
+                                          </div>
+                                        )}
                                     </div>
                                     <div className={`px-3 py-3 sm:px-4 flex justify-between items-center text-xs border-t ${t.border} ${theme === 'light' ? 'bg-slate-100/50' : 'bg-[#00205b]/30'}`}>
                                       <div className="font-bold opacity-80">
