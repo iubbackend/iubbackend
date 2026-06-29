@@ -17,7 +17,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 const ADMIN_REG = "S20BSCS1M01001"; // Target for contact support
-const SEARCH_COST = 3000;
+const SEARCH_COST = 3,000;
 
 type SearchMode = "Roll Number" | "Name";
 type Theme = "light" | "dark";
