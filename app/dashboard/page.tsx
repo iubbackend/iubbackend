@@ -343,7 +343,7 @@ export default function UserDashboardPage() {
       const limit = 7 + (page - 1) * 10;
       const [depRes, usageRes] = await Promise.all([
         supabase.from("payments_record").select("*").ilike("user_reg", currentUser.reg).order("created_at", { ascending: false }).limit(limit),
-        supabase.from("user_search_log").select("*").ilike("searcher_reg", currentUser.reg).eq("search_type", "Paid Search").order("created_at", { ascending: false }).limit(limit)
+        supabase.from("user_search_log").select("*").ilike("searcher_reg", currentUser.reg).in("search_type", ["Paid", "Free"]).order("created_at", { ascending: false }).limit(limit)
       ]);
       const newLogs = { deposits: depRes.data || [], usage: usageRes.data || [] };
       setHistoryLogs(newLogs);
@@ -355,13 +355,13 @@ export default function UserDashboardPage() {
     }
   };
 
-  const loadPaidSearchHistory = async () => {
+ const loadPaidSearchHistory = async () => {
     try {
       if (!currentUser.reg) return;
       const { data } = await supabase.from("user_search_log")
         .select("*")
         .ilike("searcher_reg", currentUser.reg)
-        .eq("search_type", "Paid Search")
+        .in("search_type", ["Paid", "Free"]) // FIX: Now grabs both types of history
         .order("created_at", { ascending: false });
       
       const uniqueHistory: any[] = [];
@@ -668,27 +668,26 @@ export default function UserDashboardPage() {
       return;
     }
 
-    // Check if they already paid to unlock this specific student in this session
     const isUnlocked = unlockedRegs.has(reg);
 
-    // Enforce strict 3000 credit cut for the initial expand
+    // Initial expand logic: Uses a Free Attempt
     if (!isUnlocked) {
-      if (credits < 3000) {
-        showToast("Out of Balance", "You need 3000 credits to view this student's results.", "error");
-        setActiveTab('credits');
+      if (freeAttempts <= 0) {
+        showToast("Out of Attempts", "You have 0 free attempts left.", "error");
         return;
       }
-      // Optimistically deduct 3000 credits for the UI feel
-      setCredits(prev => Math.max(0, prev - 3000));
+      // Optimistically deduct 1 free attempt for UI snapiness
+      setFreeAttempts(prev => Math.max(0, prev - 1));
     }
 
     setExpandedReg(reg);
 
     try {
+      // p_is_pro is false because the initial view should ONLY show mid-terms
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
         p_semester_num: null,
-        p_is_pro: true 
+        p_is_pro: false 
       });
 
       if (error) throw error;
@@ -754,7 +753,6 @@ export default function UserDashboardPage() {
         let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
         
         const canCalculate = courses.some((c: any) => c.tot !== null);
-        
         const validSemNums = courses.map((c: any) => c.db_sem_num).filter((n: any) => n !== null && n !== undefined);
         const dbSemNum = validSemNums.length > 0 ? validSemNums[0] : (parseInt(sem.replace(/\D/g, '')) || -1);
 
@@ -769,13 +767,11 @@ export default function UserDashboardPage() {
            }
         });
 
-        const sgpa = canCalculate && totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "🔒";
-
         return {
           semNum: sem.replace("Semester ", ""), 
           dbSemNum: dbSemNum,
           courses: courses,
-          sgpa: sgpa,
+          sgpa: canCalculate && totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "🔒",
           totalMarks: canCalculate ? semTotalMarks : "🔒",
           maxMarks: canCalculate ? semMaxMarks : "🔒",
           canCalculate
@@ -784,12 +780,9 @@ export default function UserDashboardPage() {
 
       setStudentDetails(sortedSemesters);
     } catch (err) {
-      showToast("Access Denied", "Could not fetch data.", "error");
+      showToast("Error", "Could not fetch data.", "error");
       setExpandedReg(null);
-      // Rollback the optimistic deduction if the server failed
-      if (!isUnlocked) {
-        setCredits(prev => prev + 3000);
-      }
+      if (!isUnlocked) setFreeAttempts(prev => prev + 1); // Rollback free attempt on error
     }
   };
 
