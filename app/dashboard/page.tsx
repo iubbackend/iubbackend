@@ -1340,25 +1340,6 @@ export default function UserDashboardPage() {
                                     )}
                                   </div>
                                 ))}
-
-                                {!studentDetails[0]?.canCalculate && (
-                                   <motion.button 
-                                     onClick={(e) => {
-                                        e.stopPropagation();
-                                        if(credits >= SEARCH_COST) {
-                                            handleExpandResult(student.reg, student.id, true);
-                                        } else {
-                                            setActiveTab('credits');
-                                        }
-                                     }}
-                                     initial={{ scale: 0.95, opacity: 0 }}
-                                     animate={{ scale: 1, opacity: 1 }}
-                                     className={`mt-2 w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-black text-sm uppercase tracking-wide transition-all shadow-md active:scale-95 ${theme === 'light' ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 border-amber-300' : 'bg-gradient-to-r from-amber-500 to-amber-600 text-[#00122a] border-amber-400 hover:from-amber-400 hover:to-amber-500'}`}
-                                   >
-                                      <Unlock size={18} />
-                                      {credits >= SEARCH_COST ? `See Full Result (${SEARCH_COST} Credits)` : `Unlock Full Result (Top Up)`}
-                                   </motion.button>
-                                )}
                               </>
                             )}
                           </div>
