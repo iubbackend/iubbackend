@@ -788,69 +788,76 @@ export default function UserDashboardPage() {
     }
 
     try {
+      // 1. Fetch the raw unlocked data from the database
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
-        p_semester_num: parseInt(semesterNum),
+        // Fallback to -1 if parseInt fails so the DB doesn't accidentally dump everything
+        p_semester_num: parseInt(semesterNum) || -1, 
         p_is_pro: true 
       });
 
       if (error || !records) throw error;
       showToast("Unlocked", `Semester ${semesterNum} unlocked successfully.`, "info");
 
-      // === NEW FIX: DEDUPLICATION & MAX MARKS LOGIC ===
-      const uniqueCourses = new Map();
+      // 2. Build a quick lookup dictionary of the highest marks returned by the DB
+      const unlockedDict = new Map();
       records.forEach((rec: any) => {
         const courseCode = rec.subject_id?.course_code || "N/A";
         const currentTotal = Number(rec.total_marks) || 0;
-        
-        // Only keep the course if it doesn't exist yet, OR if the current row has higher marks
-        if (!uniqueCourses.has(courseCode) || Number(uniqueCourses.get(courseCode).total_marks || 0) < currentTotal) {
-          uniqueCourses.set(courseCode, rec);
+        if (!unlockedDict.has(courseCode) || Number(unlockedDict.get(courseCode).total_marks || 0) < currentTotal) {
+          unlockedDict.set(courseCode, rec);
         }
       });
-      // ================================================
 
       const roundMark = (mark: any) => mark != null && mark !== "" ? Math.round(Number(mark)) : null;
-      let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
-      
-      // We now map over the UNIQUE courses, not the raw records
-      const unlockedCourses = Array.from(uniqueCourses.values()).map((rec: any) => {
-        const totalMarks = roundMark(rec.total_marks);
-        const gradeInfo = getGradeInfo(totalMarks);
-        const creds = Number(rec.subject_id?.credit_hours) || 3;
-        
-        if (totalMarks !== null) {
-             totalQualityPoints += (gradeInfo.gp * creds);
-             totalCr += creds;
-             semTotalMarks += totalMarks;
-             semMaxMarks += 100;
-        }
 
-        return {
-          code: rec.subject_id?.course_code || "N/A",
-          name: rec.subject_id?.course_name || "Unknown",
-          credits: creds,
-          mid: roundMark(rec.mid_term_marks),
-          sess: roundMark(rec.sessional_marks),
-          fin: roundMark(rec.end_term_marks),
-          prSess: roundMark(rec.practical_sessional_marks),
-          prFin: roundMark(rec.practical_final_marks),
-          tot: totalMarks,
-          gp: gradeInfo.gp,
-          grade: gradeInfo.grade
-        };
-      });
-
-      const sgpa = totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "0.00";
-
-      // Hot-swap the newly unlocked semester into the UI array
+      // 3. STRICT MERGE: Only update marks for subjects that ALREADY belong to this semester
       setStudentDetails((prev: any) => {
           if (!prev) return prev;
+          
           return prev.map((sem: any) => {
+              // Only modify the semester the user actually clicked
               if (sem.semNum === semesterNum) {
+                  let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
+
+                  // Map through the original, clean courses we already grouped for this semester
+                  const updatedCourses = sem.courses.map((existingCourse: any) => {
+                      const unlockedRec = unlockedDict.get(existingCourse.code);
+                      
+                      // If the DB sent us real marks for this specific course, apply them
+                      if (unlockedRec && unlockedRec.total_marks !== null) {
+                          const totalMarks = roundMark(unlockedRec.total_marks);
+                          const gradeInfo = getGradeInfo(totalMarks);
+                          const creds = existingCourse.credits;
+
+                          totalQualityPoints += (gradeInfo.gp * creds);
+                          totalCr += creds;
+                          semTotalMarks += totalMarks;
+                          semMaxMarks += 100;
+
+                          return {
+                              ...existingCourse,
+                              mid: roundMark(unlockedRec.mid_term_marks),
+                              sess: roundMark(unlockedRec.sessional_marks),
+                              fin: roundMark(unlockedRec.end_term_marks),
+                              prSess: roundMark(unlockedRec.practical_sessional_marks),
+                              prFin: roundMark(unlockedRec.practical_final_marks),
+                              tot: totalMarks,
+                              gp: gradeInfo.gp,
+                              grade: gradeInfo.grade
+                          };
+                      } else {
+                          // Fallback: If DB didn't return marks for it, leave it locked
+                          totalCr += existingCourse.credits;
+                          return existingCourse;
+                      }
+                  });
+
+                  const sgpa = totalCr > 0 ? (totalQualityPoints / totalCr).toFixed(2) : "0.00";
+
                   return {
                       ...sem,
-                      courses: unlockedCourses,
+                      courses: updatedCourses, // The clean, exact list of subjects
                       canCalculate: true,
                       sgpa: sgpa,
                       totalMarks: semTotalMarks,
