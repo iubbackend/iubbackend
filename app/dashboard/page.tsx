@@ -91,6 +91,7 @@ export default function UserDashboardPage() {
   const [expandedReg, setExpandedReg] = useState<string | null>(null);
   const [studentDetails, setStudentDetails] = useState<any[] | null>(null);
   const [unlockedRegs, setUnlockedRegs] = useState<Set<string>>(new Set());
+  const [cachedDetails, setCachedDetails] = useState<Record<string, any>>({});
 
   // Wallet & History State
   const [paymentForm, setPaymentForm] = useState({ package: "", amount: "", name: "", tid: "" });
@@ -668,28 +669,37 @@ export default function UserDashboardPage() {
       return;
     }
 
-    const isUnlocked = unlockedRegs.has(reg);
+    setExpandedReg(reg);
 
-    // Initial expand logic: Uses a Free Attempt
+    // 1. Skip DB call entirely if we already fetched/paid for this student
+    if (cachedDetails[reg]) {
+      setStudentDetails(cachedDetails[reg]);
+      return; 
+    }
+
+    const isUnlocked = unlockedRegs.has(reg);
+    const willUseCredits = credits >= SEARCH_COST;
+
     if (!isUnlocked) {
-      if (freeAttempts <= 0 && credits < SEARCH_COST) { // <-- ADDED CREDIT CHECK
+      if (!willUseCredits && freeAttempts <= 0) {
         showToast("Out of Balance", "You have 0 free attempts left and insufficient credits.", "error");
+        setExpandedReg(null);
         return;
       }
-      // Optimistically deduct 1 free attempt ONLY if they are relying on free attempts
-      if (freeAttempts > 0) {
+      // Optimistically deduct the correct currency
+      if (willUseCredits) {
+        setCredits(prev => Math.max(0, prev - SEARCH_COST));
+      } else {
         setFreeAttempts(prev => Math.max(0, prev - 1));
       }
     }
 
-    setExpandedReg(reg);
-
     try {
-      // p_is_pro is false because the initial view should ONLY show mid-terms
+      // p_is_pro dynamically tells the DB to charge 3k and return the latest semester
       const { data: records, error } = await supabase.rpc('unlock_semester', { 
         p_student_id: studentId, 
         p_semester_num: null,
-        p_is_pro: false 
+        p_is_pro: willUseCredits 
       });
 
       if (error) throw error;
@@ -781,10 +791,15 @@ export default function UserDashboardPage() {
       });
 
       setStudentDetails(sortedSemesters);
+      setCachedDetails(prev => ({ ...prev, [reg]: sortedSemesters })); // Cache the result!
+
     } catch (err) {
       showToast("Error", "Could not fetch data.", "error");
       setExpandedReg(null);
-      if (!isUnlocked) setFreeAttempts(prev => prev + 1); // Rollback free attempt on error
+      if (!isUnlocked) {
+         if (willUseCredits) setCredits(prev => prev + SEARCH_COST); // Rollback
+         else setFreeAttempts(prev => prev + 1); 
+      }
     }
   };
 
@@ -825,7 +840,7 @@ export default function UserDashboardPage() {
       setStudentDetails((prev: any) => {
           if (!prev) return prev;
           
-          return prev.map((sem: any) => {
+          const newDetails = prev.map((sem: any) => {
               if (sem.semNum === semesterNum) {
                   let totalQualityPoints = 0, totalCr = 0, semTotalMarks = 0, semMaxMarks = 0;
 
@@ -874,12 +889,15 @@ export default function UserDashboardPage() {
               }
               return sem;
           });
-      });
 
-    } catch (err) {
-       showToast("Error", "Failed to unlock semester. Please try again.", "error");
-    }
-  };
+          // Sync with cache
+          const studentReg = searchResults?.find(s => s.id === studentId)?.reg;
+          if (studentReg) {
+             setCachedDetails(cache => ({ ...cache, [studentReg]: newDetails }));
+          }
+
+          return newDetails;
+      });
 
   const executeReSearch = (query: string) => {
     setActiveTab("home");
