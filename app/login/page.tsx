@@ -396,7 +396,8 @@ const handleSignup = async (e: React.FormEvent) => {
     const rawNumber = phone.replace(/-/g, '');
 
     try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
+      // 1. CAPTURE THE VERIFY DATA SO WE CAN GET THE USER ID
+      const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
         type: 'signup',
@@ -427,11 +428,18 @@ const handleSignup = async (e: React.FormEvent) => {
       } else {
         const { error: insertError } = await supabase
           .from('users')
-          .insert([{ reg: cleanRoll, phone: rawNumber, email: cleanEmail, pass: hashedPassword }]);
+          .insert([{ 
+            id: verifyData?.user?.id, // 2. CRITICAL FIX: INSERT THE ID
+            reg: cleanRoll, 
+            phone: rawNumber, 
+            email: cleanEmail, 
+            pass: hashedPassword 
+          }]);
         dbError = insertError;
       }
 
       if (dbError) {
+        console.error("Database Sync Error:", dbError); // Added this so you can check browser console if it ever fails again
         setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
         setIsLoading(false);
         return;
