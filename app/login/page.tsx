@@ -286,16 +286,21 @@ function LoginContent() {
         return;
       }
 
-      const { data: studentRecord, error } = await supabase
-        .from('students')
-        .select('name')
-        .ilike('reg', cleanRoll)
-        .maybeSingle();
+      // FIX: Call the secure server function instead of the restricted students table
+      const { data: studentName, error } = await supabase.rpc('verify_signup_reg', { 
+        p_reg: cleanRoll 
+      });
 
-      if (error || !studentRecord) {
+      if (error) {
+        if (error.message.includes('Too many verification attempts')) {
+          setErrorMsg(error.message); // Triggers if they spam 5+ attempts
+        } else {
+          setErrorMsg('An unexpected error occurred during verification.');
+        }
+      } else if (!studentName) {
         setErrorMsg('This Roll Number is not exist in record Enter Correct Registration Number');
       } else {
-        setDbStudentName(studentRecord.name);
+        setDbStudentName(studentName);
         setIsRollVerified(true);
         setSuccessMsg('Registration verified. Please complete your profile.');
       }
