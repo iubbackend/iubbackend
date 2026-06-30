@@ -65,7 +65,7 @@ export default function UserDashboardPage() {
   const [currentUser, setCurrentUser] = useState({ reg: "", name: "Loading...", phone: "", email: "" });
   
   const [credits, setCredits] = useState(0);
-  const [freeAttempts, setFreeAttempts] = useState(4);
+  const [freeAttempts, setFreeAttempts] = useState(2);
   const isProMode = credits >= SEARCH_COST;
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -241,7 +241,7 @@ export default function UserDashboardPage() {
           const resetDate = userCreditsRes.free_search_reset_at ? new Date(userCreditsRes.free_search_reset_at) : new Date();
           const isReset = new Date() > resetDate;
           
-          const attempts = isReset ? 4 : Math.max(0, 4 - (userCreditsRes.free_searches_used || 0));
+          const attempts = isReset ? 2 : Math.max(0, 2 - (userCreditsRes.free_searches_used || 0));
           setFreeAttempts(attempts);
           localStorage.setItem("iub_freeAttempts", attempts.toString());
         }
@@ -251,7 +251,7 @@ export default function UserDashboardPage() {
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'user_credits', filter: `user_reg=eq.${actualReg}` }, (payload) => {
              setCredits(payload.new.credits);
              localStorage.setItem("iub_credits", payload.new.credits.toString());
-             setFreeAttempts(Math.max(0, 4 - (payload.new.free_searches_today || 0)));
+             setFreeAttempts(Math.max(0, 2 - (payload.new.free_searches_today || 0)));
           }).subscribe();
 
         // Fetch Filters safely
