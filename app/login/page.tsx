@@ -504,20 +504,35 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
     
     const supabase = getSupabase();
     const cleanEmail = email.toLowerCase().trim();
+    const cleanRoll = rollNumber.trim().toUpperCase();
+    const rawNumber = phone.replace(/-/g, '');
 
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: cleanEmail,
+      // 1. THE NUCLEAR FIX: Wipe the stuck, unverified ghost account
+      await supabase.rpc('force_delete_unverified_user', {
+          p_email: cleanEmail
       });
 
-      if (error) {
-        setErrorMsg(error.message || 'Failed to dispatch replacement code. Please wait a moment and try again.');
+      // 2. FORCE A FRESH SIGNUP: Since the ghost account is gone, 
+      // Supabase treats this as 100% new and forces the SMTP to fire the email.
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: password, // We still have this in the React state!
+        options: {
+          data: {
+            reg: cleanRoll,
+            phone: rawNumber
+          }
+        }
+      });
+
+      if (signUpError) {
+        setErrorMsg(signUpError.message || 'Failed to dispatch replacement code.');
       } else {
         setSuccessMsg('A fresh validation OTP has been dispatched to your email.');
         setResendCountdown(60);
-        setOtpAttempts(0); // <-- Reset the fails so they get 3 fresh tries
-        setOtpToken('');   // <-- Clear the old wrong token
+        setOtpAttempts(0); // Reset their 3 attempts
+        setOtpToken('');   // Clear the old input box
       }
     } catch (err) {
       setErrorMsg('Could not process resend trigger.');
