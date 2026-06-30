@@ -404,13 +404,14 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
     const rawNumber = phone.replace(/-/g, '');
 
     try {
+      // 1. Verify OTP
       const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
         type: 'signup',
       });
 
-      // --- NEW ATTEMPTS LOGIC ---
+      // --- EXISTING ATTEMPTS LOGIC (Kept exactly as you had it) ---
       if (verifyError) {
         const newCount = otpAttempts + 1;
         setOtpAttempts(newCount);
@@ -424,44 +425,27 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
         setIsLoading(false);
         return;
       }
-      // --------------------------
+      // -------------------------------------------------------------
 
       const hashedPassword = await hashPassword(password);
       
-      const { data: existingRecord } = await supabase
-        .from('users')
-        .select('reg')
-        .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`)
-        .maybeSingle();
+      // 2. FORCE SYNC via the RPC function (This replaces your previous if/else insert block)
+      const { error: rpcError } = await supabase.rpc('force_sync_user_profile', {
+          p_id: verifyData?.user?.id,
+          p_reg: cleanRoll,
+          p_email: cleanEmail,
+          p_phone: rawNumber,
+          p_pass: hashedPassword
+      });
 
-      let dbError = null;
-
-      if (existingRecord) {
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ phone: rawNumber, pass: hashedPassword, email: cleanEmail, reg: cleanRoll })
-          .or(`reg.ilike.${cleanRoll},email.ilike.${cleanEmail}`);
-        dbError = updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('users')
-          .insert([{ 
-            id: verifyData?.user?.id, 
-            reg: cleanRoll, 
-            phone: rawNumber, 
-            email: cleanEmail, 
-            pass: hashedPassword 
-          }]);
-        dbError = insertError;
-      }
-
-      if (dbError) {
-        console.error("Database Sync Error:", dbError);
+      if (rpcError) {
+        console.error("Database Sync Error:", rpcError);
         setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
         setIsLoading(false);
         return;
       }
 
+      // 3. REFERRAL TRACKING (Kept exactly as you had it)
       try {
         const activeReferrer = referralCode || (typeof window !== "undefined" ? localStorage.getItem("referred_by") : null);
         if (activeReferrer && activeReferrer.toUpperCase().trim() !== cleanRoll) {
@@ -478,6 +462,7 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
         console.error("Non-blocking tracking ledger calculation conflict:", creditErr);
       }
 
+      // 4. FINISH UP
       const userState = { reg: cleanRoll, name: "Student", phone: rawNumber, email: cleanEmail };
       localStorage.setItem("iub_currentUser_v2", JSON.stringify(userState));
       setSuccessMsg('Email verified successfully! Welcome to the portal.');
@@ -490,6 +475,7 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
           window.location.href = '/dashboard';
         }
       }, 1500);
+
     } catch (err) {
       setErrorMsg('An unexpected execution error occurred.');
     } finally {
