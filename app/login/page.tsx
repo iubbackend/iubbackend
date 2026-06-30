@@ -321,13 +321,26 @@ function LoginContent() {
     setSuccessMsg('Identity verified. Please provide your contact details.');
   };
   
-  const handleSignup = async (e: React.FormEvent) => {
+const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
   
     const cleanEmail = normalizeEmail(email);
     const cleanRoll = rollNumber.trim().toUpperCase();
+    
+    // --- NEW: Advanced Typo Detection ---
+    const commonTypos = ['@gamil.', '@gmial.', '@gmal.', '@gmail.con', '@gmai.com'];
+    if (commonTypos.some(typo => cleanEmail.includes(typo))) {
+      setErrorMsg("It looks like there's a typo in your email domain. Did you mean @gmail.com?");
+      return;
+    }
+
     const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
+  
+    if (!gmailRegex.test(cleanEmail)) {
+      setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
+      return;
+    }
   
     if (!gmailRegex.test(cleanEmail)) {
       setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
@@ -933,6 +946,21 @@ function LoginContent() {
           {/* VIEW 5: OTP VERIFICATION */}
           {view === 'verify_otp' && (
             <form onSubmit={handleVerifyOtp} className="space-y-5">
+              
+              {/* --- NEW: Visual Confirmation & Escape Hatch --- */}
+              <div className="p-3 mb-2 rounded-xl bg-blue-50/50 border border-blue-100 dark:bg-[#00205b]/30 dark:border-[#00348c]/50 text-center">
+                <p className="text-xs text-gray-500 dark:text-blue-300/70 mb-1">Code sent to:</p>
+                <p className="font-bold text-sm text-gray-900 dark:text-white break-all">{email}</p>
+                <button 
+                  type="button" 
+                  onClick={() => switchView('signup')} 
+                  className="mt-2 text-[11px] font-bold text-blue-600 dark:text-amber-400 hover:underline"
+                >
+                  Wrong email? Click here to change it.
+                </button>
+              </div>
+              {/* ---------------------------------------------- */}
+
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-blue-300/70 mb-2">
                   Enter 8-Digit Verification Code
