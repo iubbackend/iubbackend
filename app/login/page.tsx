@@ -324,13 +324,11 @@ function LoginContent() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
-
-    // The name check is now handled in the previous step.
   
     const cleanEmail = normalizeEmail(email);
     const cleanRoll = rollNumber.trim().toUpperCase();
     const gmailRegex = /^[a-z0-9](\.?[a-z0-9]){4,}@gmail\.com$/;
-    
+  
     if (!gmailRegex.test(cleanEmail)) {
       setErrorMsg('Only standard, valid @gmail.com email addresses are allowed.');
       return;
@@ -338,7 +336,7 @@ function LoginContent() {
   
     const rawNumber = phone.replace(/-/g, '');
     if (!rawNumber.startsWith('03') || rawNumber.length !== 11) {
-      setErrorMsg('You entered the wrong number. Enter your correct number otherwise your account can be compromised.');
+      setErrorMsg('Invalid phone number. Must be 03xx-xxxxxxx');
       return;
     }
   
@@ -346,19 +344,7 @@ function LoginContent() {
     const supabase = getSupabase();
   
     try {
-      const { data: emailDuplicateCheck } = await supabase
-        .from('users')
-        .select('email')
-        .ilike('email', cleanEmail)
-        .maybeSingle();
-
-      if (emailDuplicateCheck) {
-        setErrorMsg('Email domain profile already exists.');
-        setIsLoading(false);
-        return;
-      }
-
-      const { error: authError } = await supabase.auth.signUp({
+      const { data, error: authError } = await supabase.auth.signUp({
         email: cleanEmail,
         password: password,
         options: {
@@ -370,25 +356,22 @@ function LoginContent() {
       });
   
       if (authError) {
-        setErrorMsg(authError.message || 'Error setting up account authentication.');
-        setIsLoading(false);
+        console.error("Auth Signup Error:", authError);
+        setErrorMsg(authError.message || 'Signup failed');
         return;
       }
   
-      let formattedMsg = 'A verification code has been sent. IMPORTANT: If you do not see it in your Inbox, check your SPAM folder!';
-      setSuccessMsg(formattedMsg);
-      setResendCountdown(60);
-      setTimeout(() => {
-        clearMessages();
-        setView('verify_otp');
-      }, 3500);
-    } catch (err) {
-      setErrorMsg('An unexpected error occurred.');
+      // Success
+      setSuccessMsg('Account created! Check your email (including SPAM) for verification code.');
+      setTimeout(() => setView('verify_otp'), 2500);
+  
+    } catch (err: any) {
+      console.error("Full Signup Error:", err);
+      setErrorMsg(err.message || 'An unexpected error occurred during signup.');
     } finally {
       setIsLoading(false);
     }
   };
-
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
