@@ -78,6 +78,7 @@ function LoginContent() {
   const [password, setPassword] = useState('');
   const [otpToken, setOtpToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [otpAttempts, setOtpAttempts] = useState(0);
   
  // --- EMAIL NORMALIZATION HELPER ---
   const normalizeEmail = (rawEmail: string) => {
@@ -181,6 +182,7 @@ function LoginContent() {
     setIsNameVerified(false);
     setStudentName('');
     setShowPassword(false);
+    setOtpAttempts(0);
     clearMessages();
   };
 
@@ -385,29 +387,44 @@ const handleSignup = async (e: React.FormEvent) => {
       setIsLoading(false);
     }
   };
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
-    setIsLoading(true);
 
+    // Prevent them from brute-forcing if they already failed 3 times
+    if (otpAttempts >= 3) {
+        setErrorMsg('Maximum attempts reached. For security, this code is locked. Please click "Resend Verification Code" below to get a fresh one.');
+        return;
+    }
+
+    setIsLoading(true);
     const supabase = getSupabase();
     const cleanEmail = email.toLowerCase().trim();
     const cleanRoll = rollNumber.trim().toUpperCase();
     const rawNumber = phone.replace(/-/g, '');
 
     try {
-      // 1. CAPTURE THE VERIFY DATA SO WE CAN GET THE USER ID
       const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: otpToken.trim(),
         type: 'signup',
       });
 
+      // --- NEW ATTEMPTS LOGIC ---
       if (verifyError) {
-        setErrorMsg(verifyError.message || 'Invalid or expired verification code.');
+        const newCount = otpAttempts + 1;
+        setOtpAttempts(newCount);
+
+        if (newCount >= 3) {
+            setErrorMsg('Maximum attempts reached. For security, this code is locked. Please click "Resend Verification Code" below to get a fresh one.');
+            setOtpToken(''); // Clear the input
+        } else {
+            setErrorMsg(`Invalid verification code. You have ${3 - newCount} attempts remaining.`);
+        }
         setIsLoading(false);
         return;
       }
+      // --------------------------
 
       const hashedPassword = await hashPassword(password);
       
@@ -429,7 +446,7 @@ const handleSignup = async (e: React.FormEvent) => {
         const { error: insertError } = await supabase
           .from('users')
           .insert([{ 
-            id: verifyData?.user?.id, // 2. CRITICAL FIX: INSERT THE ID
+            id: verifyData?.user?.id, 
             reg: cleanRoll, 
             phone: rawNumber, 
             email: cleanEmail, 
@@ -439,7 +456,7 @@ const handleSignup = async (e: React.FormEvent) => {
       }
 
       if (dbError) {
-        console.error("Database Sync Error:", dbError); // Added this so you can check browser console if it ever fails again
+        console.error("Database Sync Error:", dbError);
         setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
         setIsLoading(false);
         return;
@@ -479,7 +496,7 @@ const handleSignup = async (e: React.FormEvent) => {
       setIsLoading(false);
     }
   };
-
+  
   const handleResendOtp = async () => {
     if (resendCountdown > 0) return;
     clearMessages();
@@ -495,10 +512,12 @@ const handleSignup = async (e: React.FormEvent) => {
       });
 
       if (error) {
-        setErrorMsg(error.message || 'Failed to dispatch replacement code.');
+        setErrorMsg(error.message || 'Failed to dispatch replacement code. Please wait a moment and try again.');
       } else {
         setSuccessMsg('A fresh validation OTP has been dispatched to your email.');
         setResendCountdown(60);
+        setOtpAttempts(0); // <-- Reset the fails so they get 3 fresh tries
+        setOtpToken('');   // <-- Clear the old wrong token
       }
     } catch (err) {
       setErrorMsg('Could not process resend trigger.');
