@@ -898,6 +898,10 @@ export default function UserDashboardPage() {
 
           return newDetails;
       });
+    } catch (err) {
+       showToast("Error", "Failed to unlock semester. Please try again.", "error");
+    }
+  };
 
   const executeReSearch = (query: string) => {
     setActiveTab("home");
