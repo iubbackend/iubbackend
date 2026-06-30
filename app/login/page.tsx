@@ -439,8 +439,8 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
       });
 
       if (rpcError) {
-        console.error("Database Sync Error:", rpcError);
-        setErrorMsg('Auth succeeded, but database profile synchronization failed. Contact support.');
+        // THIS WILL PRINT THE EXACT DATABASE ERROR ON YOUR SCREEN
+        setErrorMsg(`DB Error: ${rpcError.message} | Details: ${rpcError.details || 'None'}`);
         setIsLoading(false);
         return;
       }
