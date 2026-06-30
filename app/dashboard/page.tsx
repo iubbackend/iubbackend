@@ -542,12 +542,12 @@ export default function UserDashboardPage() {
     try {
       const { data: isAllowed, error: rateError } = await supabase.rpc('check_rate_limit', {
         p_user_reg: currentUser.reg,
-        p_max_actions: 5,        
-        p_window_seconds: 60      
+        p_max_actions: 10,        // <-- CHANGED FROM 5
+        p_window_seconds: 86400   // <-- CHANGED FROM 60 (Now 1 Day)
       });
 
       if (rateError || !isAllowed) {
-        showToast("Slow Down", "Rate limit exceeded. Please wait a moment.", "error");
+        showToast("Slow Down", "Daily search limit exceeded. Try again tomorrow.", "error"); // <-- OPTIONAL: Updated toast message
         setIsSearching(false);
         return;
       }
@@ -672,12 +672,14 @@ export default function UserDashboardPage() {
 
     // Initial expand logic: Uses a Free Attempt
     if (!isUnlocked) {
-      if (freeAttempts <= 0) {
-        showToast("Out of Attempts", "You have 0 free attempts left.", "error");
+      if (freeAttempts <= 0 && credits < SEARCH_COST) { // <-- ADDED CREDIT CHECK
+        showToast("Out of Balance", "You have 0 free attempts left and insufficient credits.", "error");
         return;
       }
-      // Optimistically deduct 1 free attempt for UI snapiness
-      setFreeAttempts(prev => Math.max(0, prev - 1));
+      // Optimistically deduct 1 free attempt ONLY if they are relying on free attempts
+      if (freeAttempts > 0) {
+        setFreeAttempts(prev => Math.max(0, prev - 1));
+      }
     }
 
     setExpandedReg(reg);
