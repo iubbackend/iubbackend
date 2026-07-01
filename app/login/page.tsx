@@ -682,7 +682,7 @@ const handleVerifyOtp = async (e: React.FormEvent) => {
               <path d="M7 14l3-3 2 2 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             <h1 className="text-base sm:text-lg font-black tracking-tight leading-none whitespace-nowrap dark:text-white">
-              IUB Result<span className="text-blue-600 dark:text-amber-500">Backend</span>
+              Result<span className="text-blue-600 dark:text-amber-500">Portal</span>
             </h1>
           </div>
           
